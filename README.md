@@ -1,47 +1,65 @@
-Mira Mini Apps
+# Mira Mini Apps
 
-Community-made mini apps, games, utilities, and experiments for Mira smart glasses, built using the public Mira SDK.
+Community-made mini apps, games, utilities, and experiments for **Mira smart glasses**, built using the public Mira SDK.
 
 This repository is intended as a simple place to collect and share small Mira applications that can be loaded through the Mira app-creation interface.
 
-Current Apps
+## Current Apps
 
-Sudoku
+### Sudoku
 
 A Sudoku game designed for the Mira glasses display and input system.
 
 Features include:
 
-* Glasses-friendly 640×480 interface
-* Grid-based navigation
-* Mira touch/ring controls
-* Head-controlled selection support
-* Self-contained HTML package
+- Glasses-friendly 640×480 interface
+- Grid-based navigation
+- Mira touch/ring controls
+- Head-controlled selection support
+- Self-contained HTML package
 
-Minesweeper
+### Minesweeper
 
-A classic Minesweeper clone adapted for Mira glasses.
+A classic Minesweeper-style game adapted for Mira glasses.
 
 Features include:
 
-* 9×9 beginner board
-* 10 mines
-* First-click safety
-* Automatic clearing of empty areas
-* Flags
-* Win and loss detection
-* Touch/ring controls
-* Head-controlled cell selection
-* Phone companion settings for head-pointer sensitivity
-* Self-contained HTML package
+- 9×9 beginner board
+- 10 mines
+- First-click safety
+- Automatic clearing of empty areas
+- Flags
+- Win and loss detection
+- Touch/ring controls
+- Head-controlled cell selection
+- Phone companion settings for head-pointer sensitivity
+- Self-contained HTML package
 
-Installation
+### Fleet Grid
 
-Each Mira app is provided as a single .html file.
+A classic naval strategy game designed for the Mira glasses display and controls.
+
+Place your fleet on a grid, then search the opposing grid and attempt to sink the enemy fleet before yours is destroyed.
+
+Features include:
+
+- Grid-based naval strategy gameplay
+- Player and opponent fleets
+- Ship placement
+- Hit and miss tracking
+- Win and loss detection
+- Mira touch/ring navigation
+- Head-controlled grid selection
+- Glasses-friendly interface
+- Self-contained HTML package
+
+## Installation
+
+Each Mira app is provided as a single `.html` file.
 
 To use an app:
 
-1. Download or copy the desired .html file.
+1. Download or copy the desired `.html` file.
 2. Open the Mira app-creation interface on your iPhone.
 3. Create a new mini app.
 4. Paste or import the HTML source.
@@ -51,22 +69,22 @@ To use an app:
 
 No additional JavaScript libraries, packages, or external files are required unless specifically noted.
 
-Controls
+## Controls
 
 Controls may vary by app, but Mira mini apps can use standard glasses inputs such as:
 
-* Tap / click
-* Long press
-* Swipe up
-* Swipe down
-* Mira ring controls
-* Head movement using the glasses’ IMU sensors
+- Tap / click
+- Long press
+- Swipe up
+- Swipe down
+- Mira ring controls
+- Head movement using the glasses' IMU sensors
 
 Individual apps include their own control instructions.
 
-Hardware Testing
+## Hardware Testing
 
-These apps are being developed using Mira’s public SDK.
+These apps are being developed using Mira's public SDK.
 
 Some apps may initially be created and tested in the Mira iPhone app before being tested on physical Mira glasses.
 
@@ -74,26 +92,26 @@ Because the Mira SDK and hardware ecosystem are still relatively new, behavior m
 
 If you try one of these apps on actual Mira glasses and find a problem, feedback is welcome.
 
-About the Code
+## About the Code
 
 The apps in this repository are intentionally designed to be:
 
-* Small
-* Self-contained
-* Easy to inspect
-* Easy to modify
-* Easy to share
-* Suitable for learning the Mira SDK
+- Small
+- Self-contained
+- Easy to inspect
+- Easy to modify
+- Easy to share
+- Suitable for learning the Mira SDK
 
 Most apps consist of one combined HTML file containing both the Mira glasses code and, when needed, an optional iPhone companion interface.
 
-Community
+## Community
 
 If you own Mira glasses and would like to try one of these apps, feel free to download the source and experiment with it.
 
 Suggestions, bug reports, improvements, and ideas for new Mira mini apps are welcome.
 
-Disclaimer
+## Disclaimer
 
 These are unofficial community-created applications.
 
@@ -101,7 +119,7 @@ They are not produced, endorsed, or supported by Mira.
 
 Use them at your own discretion, particularly while the Mira SDK and hardware platform are still evolving.
 
-License
+## License
 
 Unless otherwise noted, the code in this repository is intended for personal experimentation and community sharing.
 

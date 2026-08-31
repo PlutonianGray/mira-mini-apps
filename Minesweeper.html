@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <script type="application/mira-manifest+json">
+  { "title": "Minesweeper", "description": "Classic Minesweeper for Mira glasses with ring, touch-bar, head selection, or phone controls.", "phoneIcon": "star" }
+  </script>
+  <style>
+    :root { color-scheme: light; --ink:#163b20; --green:#1d7134; --soft:#edf7ef; --line:#bad7c0; --warn:#a83f32; }
+    * { box-sizing:border-box; }
+    body { margin:0; padding:18px; font:16px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; color:var(--ink); background:#f5faf6; }
+    #mira-companion-root { max-width:520px; margin:0 auto; }
+    h1 { margin:0 0 4px; font-size:24px; }
+    .sub { margin:0 0 15px; color:#64806a; }
+    .topbar, .actions, .head-controls { display:flex; gap:9px; flex-wrap:wrap; align-items:center; }
+    button, input { min-height:42px; font:inherit; }
+    button { padding:10px 13px; border:0; border-radius:10px; color:#fff; background:var(--green); font-weight:650; }
+    button.secondary { color:var(--ink); background:#e3f1e6; }
+    button:active { transform:translateY(1px); }
+    #board { display:grid; grid-template-columns:repeat(9,1fr); aspect-ratio:1; margin:16px 0; border:3px solid var(--ink); background:#fff; }
+    .cell { min-width:0; min-height:0; padding:0; border:0 solid #9fb9a4; border-right-width:1px; border-bottom-width:1px; border-radius:0; color:var(--green); background:#d7e8db; font-size:clamp(15px,5vw,22px); font-weight:700; }
+    .cell:nth-child(9n) { border-right-width:0; }
+    .cell.revealed { color:var(--ink); background:#fff; font-weight:600; }
+    .cell.selected { outline:3px solid var(--green); outline-offset:-3px; }
+    .cell.mine { color:#fff; background:var(--warn); }
+    .cell.flag { color:var(--warn); background:#f3e4c8; }
+    .cell.wrong { color:var(--warn); background:#fff0ed; }
+    #status { min-height:48px; margin:12px 0; padding:11px 13px; border:1px solid var(--line); border-radius:11px; background:#fff; white-space:pre-line; }
+    .head-card { margin-top:14px; padding:13px; border-radius:12px; background:var(--soft); }
+    .head-card .title-row { display:flex; gap:8px; align-items:center; font-weight:650; }
+    .head-controls { margin-top:10px; }
+    .head-controls label { display:block; flex:1; min-width:135px; font-weight:400; }
+    input[type="range"] { width:100%; min-height:30px; accent-color:var(--green); }
+    .toggles { display:flex; gap:12px; flex-wrap:wrap; margin-top:8px; }
+    .toggles label { display:flex; gap:6px; align-items:center; font-weight:400; }
+    .fine { margin:10px 0 0; color:#64806a; font-size:13px; line-height:1.4; }
+  </style>
+</head>
+<body>
+<main id="mira-companion-root">
+  <h1>Minesweeper</h1>
+  <p class="sub">9×9 beginner field. Play on the glasses or use this screen as backup controls.</p>
+  <div class="topbar">
+    <button id="new" type="button">New game</button>
+    <button id="flag" class="secondary" type="button">Flag cell</button>
+    <button id="reveal" class="secondary" type="button">Reveal</button>
+  </div>
+  <div id="board" aria-label="Minesweeper board"></div>
+  <div id="status">Waiting for the glasses...</div>
+  <section class="head-card">
+    <label class="title-row"><input id="head" type="checkbox" checked> Select cells by head position</label>
+    <div class="head-controls">
+      <label>Horizontal range <span id="yawValue">30</span> degrees<input id="yaw" type="range" min="16" max="50" value="30"></label>
+      <label>Vertical range <span id="pitchValue">24</span> degrees<input id="pitch" type="range" min="14" max="40" value="24"></label>
+      <button id="recenter" class="secondary" type="button">Recenter</button>
+    </div>
+    <div class="toggles">
+      <label><input id="invertX" type="checkbox"> Invert left/right</label>
+      <label><input id="invertY" type="checkbox"> Invert up/down</label>
+    </div>
+    <p class="fine">Tap a covered cell to reveal it. Flag marks a mine. Recenter while looking straight ahead.</p>
+  </section>
+</main>
+
+<script>
+(function () {
+  var boardEl = document.getElementById('board');
+  var headEl = document.getElementById('head');
+  var yawEl = document.getElementById('yaw');
+  var pitchEl = document.getElementById('pitch');
+  var invertXEl = document.getElementById('invertX');
+  var invertYEl = document.getElementById('invertY');
+  var statusEl = document.getElementById('status');
+
+  function send(message) {
+    if (typeof miraCompanion !== 'undefined' && miraCompanion.sendToApp) {
+      miraCompanion.sendToApp(message);
+    } else {
+      statusEl.textContent = 'Waiting for the glasses...';
+    }
+  }
+
+  for (var i = 0; i < 81; i++) {
+    var cell = document.createElement('button');
+    cell.className = 'cell';
+    cell.type = 'button';
+    cell.dataset.index = String(i);
+    cell.setAttribute('aria-label', 'Row ' + (Math.floor(i / 9) + 1) + ', column ' + (i % 9 + 1));
+    cell.onclick = function () { send({ type:'select', index:Number(this.dataset.index) }); };
+    boardEl.appendChild(cell);
+  }
+
+  function redrawPhone(state) {
+    headEl.checked = state.headSelect !== false;
+    yawEl.value = String(state.yawRange || 30);
+    pitchEl.value = String(state.pitchRange || 24);
+    invertXEl.checked = !!state.invertX;
+    invertYEl.checked = !!state.invertY;
+    document.getElementById('yawValue').textContent = String(state.yawRange || 30);
+    document.getElementById('pitchValue').textContent = String(state.pitchRange || 24);
+    var grid = state.board || '';
+    Array.prototype.forEach.call(boardEl.children, function (cell, index) {
+      var mark = grid.charAt(index) || '.';
+      cell.textContent = mark === '.' || mark === '_' ? '' : (mark === 'F' ? 'F' : (mark === '*' ? '*' : (mark === 'x' ? 'X' : mark)));
+      cell.className = 'cell' +
+        (index === state.selected ? ' selected' : '') +
+        (mark === 'F' ? ' flag' : '') +
+        (mark === '*' ? ' mine' : '') +
+        (mark === 'x' ? ' wrong' : '') +
+        (mark !== '.' && mark !== 'F' ? ' revealed' : '');
+    });
+    statusEl.textContent = (state.status || 'Ready') + '\nMines left ' + (state.minesLeft != null ? state.minesLeft : 10) +
+      ' · Revealed ' + (state.revealed || 0) + '/' + (state.safeCells || 71);
+  }
+
+  document.getElementById('new').onclick = function () { send({ type:'newGame' }); };
+  document.getElementById('flag').onclick = function () { send({ type:'flag' }); };
+  document.getElementById('reveal').onclick = function () { send({ type:'reveal' }); };
+  document.getElementById('recenter').onclick = function () { send({ type:'recenter' }); };
+  headEl.onchange = function () { send({ type:'settings', pointerEnabled:headEl.checked }); };
+  function sendHeadConfig() {
+    document.getElementById('yawValue').textContent = yawEl.value;
+    document.getElementById('pitchValue').textContent = pitchEl.value;
+    send({ type:'settings', yawRange:Number(yawEl.value), pitchRange:Number(pitchEl.value) });
+  }
+  yawEl.onchange = sendHeadConfig;
+  pitchEl.onchange = sendHeadConfig;
+  function sendInvert() {
+    send({ type:'settings', invertX:invertXEl.checked, invertY:invertYEl.checked });
+  }
+  invertXEl.onchange = sendInvert;
+  invertYEl.onchange = sendInvert;
+
+  if (typeof miraCompanion !== 'undefined' && miraCompanion.onFromApp) {
+    var stop = miraCompanion.onFromApp(function (message) {
+      if (!message) return;
+      if (message.type === 'state') redrawPhone(message);
+      if (message.type === 'stop') {
+        statusEl.textContent = 'Waiting for the glasses...';
+        if (stop) stop();
+      }
+    });
+  }
+})();
+</script>
+
+<script type="mira-app">
+(function () {
+  var INK = 15, MID = 8, LOW = 4, OPEN = 2;
+  var COLS = 9, ROWS = 9, MINES = 10;
+  var GX = 22, GY = 52, CELL = 36;
+  var TOTAL = COLS * ROWS, SAFE = TOTAL - MINES;
+
+  var board = [];
+  var minesPlaced = false;
+  var gameState = 'ready';
+  var selected = 40;
+  var revealedCount = 0;
+  var flagCount = 0;
+  var yawRange = 30, pitchRange = 24;
+  var invertX = false, invertY = false, pointerEnabled = true;
+  var pointer = { baseYaw:null, basePitch:null, x:320, y:240 };
+  var manualFrames = 0;
+
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  function wrap(angle) {
+    while (angle > 180) angle -= 360;
+    while (angle < -180) angle += 360;
+    return angle;
+  }
+  function idx(r, c) { return r * COLS + c; }
+  function rowOf(i) { return (i / COLS) | 0; }
+  function colOf(i) { return i % COLS; }
+  function cellAt(r, c) {
+    return (r >= 0 && r < ROWS && c >= 0 && c < COLS) ? board[idx(r, c)] : null;
+  }
+
+  function resetPointer() {
+    pointer.baseYaw = null;
+    pointer.basePitch = null;
+    pointer.x = 320;
+    pointer.y = 240;
+    manualFrames = 0;
+  }
+
+  function resetGame() {
+    board = [];
+    for (var i = 0; i < TOTAL; i++) board.push({ mine:false, count:0, revealed:false, flagged:false });
+    minesPlaced = false;
+    gameState = 'ready';
+    selected = 40;
+    revealedCount = 0;
+    flagCount = 0;
+    manualFrames = 0;
+    resetPointer();
+    render();
+    publish();
+  }
+
+  function shuffledCandidates(firstRow, firstCol) {
+    var candidates = [];
+    var r, c, i, j, t;
+    for (r = 0; r < ROWS; r++) {
+      for (c = 0; c < COLS; c++) {
+        if (Math.abs(r - firstRow) <= 1 && Math.abs(c - firstCol) <= 1) continue;
+        candidates.push(idx(r, c));
+      }
+    }
+    for (i = candidates.length - 1; i > 0; i--) {
+      j = Math.floor(Math.random() * (i + 1));
+      t = candidates[i]; candidates[i] = candidates[j]; candidates[j] = t;
+    }
+    return candidates;
+  }
+
+  function placeMines(firstRow, firstCol) {
+    var candidates = shuffledCandidates(firstRow, firstCol);
+    var i, r, c, dr, dc, n, cell, count;
+    var nMines = Math.min(MINES, candidates.length);
+    for (i = 0; i < nMines; i++) board[candidates[i]].mine = true;
+    for (r = 0; r < ROWS; r++) {
+      for (c = 0; c < COLS; c++) {
+        cell = cellAt(r, c);
+        if (cell.mine) continue;
+        count = 0;
+        for (dr = -1; dr <= 1; dr++) {
+          for (dc = -1; dc <= 1; dc++) {
+            if (!dr && !dc) continue;
+            n = cellAt(r + dr, c + dc);
+            if (n && n.mine) count++;
+          }
+        }
+        cell.count = count;
+      }
+    }
+    minesPlaced = true;
+    gameState = 'playing';
+  }
+
+  function revealFlood(startRow, startCol) {
+    var queue = [[startRow, startCol]];
+    var seen = {};
+    while (queue.length) {
+      var item = queue.shift();
+      var r = item[0], c = item[1], k = r + ':' + c;
+      if (seen[k]) continue;
+      seen[k] = true;
+      var cell = cellAt(r, c);
+      if (!cell || cell.revealed || cell.flagged || cell.mine) continue;
+      cell.revealed = true;
+      revealedCount++;
+      if (cell.count === 0) {
+        for (var dr = -1; dr <= 1; dr++) {
+          for (var dc = -1; dc <= 1; dc++) {
+            if (!dr && !dc) continue;
+            var nr = r + dr, nc = c + dc, n = cellAt(nr, nc);
+            if (n && !n.revealed && !n.flagged && !n.mine) queue.push([nr, nc]);
+          }
+        }
+      }
+    }
+  }
+
+  function checkWin() {
+    if (revealedCount !== SAFE) return false;
+    gameState = 'won';
+    for (var i = 0; i < TOTAL; i++) {
+      if (board[i].mine && !board[i].flagged) { board[i].flagged = true; flagCount++; }
+    }
+    return true;
+  }
+
+  function revealSelected() {
+    if (gameState === 'won' || gameState === 'lost') { resetGame(); return; }
+    var r = rowOf(selected), c = colOf(selected);
+    var cell = cellAt(r, c);
+    if (!cell || cell.flagged || cell.revealed) return;
+    if (!minesPlaced) placeMines(r, c);
+    cell = cellAt(r, c);
+    if (cell.mine) {
+      cell.revealed = true;
+      gameState = 'lost';
+    } else {
+      revealFlood(r, c);
+      checkWin();
+    }
+    render();
+    publish();
+  }
+
+  function toggleFlag() {
+    if (gameState === 'won' || gameState === 'lost') return;
+    var cell = board[selected];
+    if (!cell || cell.revealed) return;
+    if (cell.flagged) { cell.flagged = false; flagCount--; }
+    else if (flagCount < MINES) { cell.flagged = true; flagCount++; }
+    render();
+    publish();
+  }
+
+  function selectIndex(index, fromManual) {
+    if (index == null || index === '' || typeof index === 'boolean') return false;
+    var value = Number(index);
+    if (!Number.isFinite(value) || Math.floor(value) !== value || value < 0 || value >= TOTAL) return false;
+    selected = value;
+    if (fromManual) manualFrames = 120;
+    return true;
+  }
+
+  function moveLinear(delta) {
+    selectIndex((selected + delta + TOTAL) % TOTAL, true);
+    render();
+    publish();
+  }
+
+  function nudge(dx, dy) {
+    dx = Number(dx);
+    dy = Number(dy);
+    dx = Number.isFinite(dx) ? clamp(Math.round(dx), -1, 1) : 0;
+    dy = Number.isFinite(dy) ? clamp(Math.round(dy), -1, 1) : 0;
+    if (!dx && !dy) return;
+    var r = clamp(rowOf(selected) + dy, 0, ROWS - 1);
+    var c = clamp(colOf(selected) + dx, 0, COLS - 1);
+    selectIndex(idx(r, c), true);
+    render();
+    publish();
+  }
+
+  function statusText() {
+    if (gameState === 'ready') return 'TAP TO START';
+    if (gameState === 'won') return 'BOARD CLEARED';
+    if (gameState === 'lost') return 'MINE HIT';
+    return 'CLEAR THE FIELD';
+  }
+
+  function boardString() {
+    var out = '';
+    for (var i = 0; i < TOTAL; i++) {
+      var cell = board[i];
+      if (gameState === 'lost' && cell.flagged && !cell.mine) out += 'x';
+      else if (cell.flagged && !(gameState === 'lost' && cell.mine)) out += 'F';
+      else if (cell.mine && (cell.revealed || gameState === 'lost')) out += '*';
+      else if (cell.revealed && cell.count) out += String(cell.count);
+      else if (cell.revealed) out += '_';
+      else out += '.';
+    }
+    return out;
+  }
+
+  function publish() {
+    if (typeof miraCompanion === 'undefined' || !miraCompanion.sendToCompanion) return;
+    miraCompanion.sendToCompanion({
+      type:'state',
+      status:statusText(),
+      minesLeft:Math.max(0, MINES - flagCount),
+      revealed:revealedCount,
+      safeCells:SAFE,
+      selected:selected,
+      board:boardString(),
+      headSelect:pointerEnabled,
+      pointerEnabled:pointerEnabled,
+      yawRange:yawRange,
+      pitchRange:pitchRange,
+      invertX:invertX,
+      invertY:invertY,
+      gameState:gameState
+    });
+  }
+
+  function columnDigits(col) {
+    var lines = [];
+    for (var row = 0; row < ROWS; row++) {
+      var cell = cellAt(row, col);
+      if (cell.revealed && !cell.mine && cell.count > 0) lines.push(String(cell.count));
+      else lines.push(' ');
+    }
+    return lines.join('\n');
+  }
+
+  function buildChrome() {
+    return {
+      kind:'rect', x:0, y:0, w:0, h:0, stroke:0, strokeWidth:0,
+      children:{
+        'ms:chrome:title':{ kind:'text', x:22, y:10, w:200, h:32, text:'MINESWEEPER', fill:INK, fontSize:24 },
+        'ms:chrome:mines':{ kind:'text', x:228, y:14, w:118, h:26, text:'MINES ' + Math.max(0, MINES - flagCount), align:'right', fill:INK, fontSize:18 }
+      }
+    };
+  }
+
+  function buildBoard() {
+    var children = {};
+    var r, c, i, line, weight, cell, x, y;
+    for (i = 0; i < TOTAL; i++) {
+      cell = board[i];
+      r = rowOf(i); c = colOf(i);
+      x = GX + c * CELL; y = GY + r * CELL;
+      if (cell.revealed && !cell.mine) {
+        children['ms:open:' + i] = { kind:'rect', x:x + 1, y:y + 1, w:CELL - 2, h:CELL - 2, fill:OPEN };
+      }
+      if (cell.mine && (cell.revealed || gameState === 'lost')) {
+        children['ms:mine:' + i] = { kind:'rect', x:x + 10, y:y + 10, w:16, h:16, cornerRadius:8, fill:INK };
+      }
+      if (cell.flagged && !(gameState === 'lost' && cell.mine)) {
+        children['ms:flag:pole:' + i] = { kind:'line', x1:x + 13, y1:y + 8, x2:x + 13, y2:y + 28, stroke:INK, strokeWidth:2 };
+        children['ms:flag:cloth:' + i] = { kind:'rect', x:x + 14, y:y + 8, w:12, h:10, fill:INK };
+      }
+      if (gameState === 'lost' && cell.flagged && !cell.mine) {
+        children['ms:bad:a:' + i] = { kind:'line', x1:x + 8, y1:y + 8, x2:x + 28, y2:y + 28, stroke:INK, strokeWidth:2 };
+        children['ms:bad:b:' + i] = { kind:'line', x1:x + 28, y1:y + 8, x2:x + 8, y2:y + 28, stroke:INK, strokeWidth:2 };
+      }
+    }
+    for (line = 0; line <= ROWS; line++) {
+      weight = (line === 0 || line === ROWS) ? 2 : 1;
+      children['ms:grid:h:' + line] = { kind:'line', x1:GX, y1:GY + line * CELL, x2:GX + COLS * CELL, y2:GY + line * CELL, stroke:INK, strokeWidth:weight };
+      children['ms:grid:v:' + line] = { kind:'line', x1:GX + line * CELL, y1:GY, x2:GX + line * CELL, y2:GY + ROWS * CELL, stroke:INK, strokeWidth:weight };
+    }
+    children['ms:cursor'] = {
+      kind:'rect',
+      x:GX + colOf(selected) * CELL + 2,
+      y:GY + rowOf(selected) * CELL + 2,
+      w:CELL - 4, h:CELL - 4,
+      cornerRadius:6, stroke:INK, strokeWidth:2
+    };
+    for (c = 0; c < COLS; c++) {
+      children['ms:col:' + c] = {
+        kind:'text', x:GX + c * CELL + 2, y:GY + 6, w:CELL - 4, h:324,
+        text:columnDigits(c), align:'center', fill:INK, fontSize:24, lineSpacing:CELL
+      };
+    }
+    return { kind:'rect', x:0, y:0, w:0, h:0, stroke:0, strokeWidth:0, children:children };
+  }
+
+  function buildSide() {
+    var mode = gameState === 'won' ? 'CLEARED' : gameState === 'lost' ? 'MINE HIT' : gameState === 'ready' ? 'READY' : 'SWEEP';
+    var coord = 'R' + (rowOf(selected) + 1) + ' C' + (colOf(selected) + 1);
+    var instructions = (gameState === 'won' || gameState === 'lost')
+      ? 'Tap: new game\nHold: new game\nPhone: new game'
+      : (pointerEnabled ? 'Look: pick cell\nTap: reveal\nHold: flag' : 'Swipe: next cell\nTap: reveal\nHold: flag');
+    return {
+      kind:'rect', x:0, y:0, w:0, h:0, stroke:0, strokeWidth:0,
+      children:{
+        'ms:side:mode':{ kind:'text', x:360, y:52, w:260, h:26, text:mode, align:'center', fill:MID, fontSize:18 },
+        'ms:side:card':{ kind:'rect', x:390, y:88, w:200, h:100, cornerRadius:12, stroke:INK, strokeWidth:2 },
+        'ms:side:value':{ kind:'text', x:398, y:104, w:184, h:56, text:coord, align:'center', fill:INK, fontSize:24 },
+        'ms:side:count':{ kind:'text', x:360, y:200, w:260, h:26, text:'OPEN ' + revealedCount + '/' + SAFE, align:'center', fill:MID, fontSize:18 },
+        'ms:side:status':{ kind:'text', x:360, y:236, w:260, h:30, padding:0, text:statusText(), align:'center', fill:INK, fontSize:18 },
+        'ms:side:instructions':{ kind:'text', x:360, y:284, w:260, h:90, padding:0, text:instructions, align:'center', fill:MID, fontSize:18, lineSpacing:30 }
+      }
+    };
+  }
+
+  function render() {
+    miraCanvas.draw('ms:chrome', buildChrome());
+    miraCanvas.draw('ms:board', buildBoard());
+    miraCanvas.draw('ms:side', buildSide());
+  }
+
+  function updateHeadPointer() {
+    if (!pointerEnabled || manualFrames > 0) return false;
+    var imu = miraCanvas.getIMU(), att = imu && imu.attitude;
+    var ageMs = Number(imu && imu.ageMs);
+    if (!imu || !imu.available || !Number.isFinite(ageMs) || ageMs < 0 || ageMs > 1600 || !att) return false;
+    var yawRaw = Number.isFinite(Number(att.z_yaw)) ? Number(att.z_yaw) : Number(att.z);
+    var pitchRaw = Number.isFinite(Number(att.y_pitch)) ? Number(att.y_pitch) : Number(att.y);
+    if (!Number.isFinite(yawRaw) || !Number.isFinite(pitchRaw)) return false;
+    if (pointer.baseYaw == null) {
+      pointer.baseYaw = yawRaw; pointer.basePitch = pitchRaw; pointer.x = 320; pointer.y = 240;
+      return false;
+    }
+    var targetX = clamp(320 + (invertX ? -1 : 1) * wrap(yawRaw - pointer.baseYaw) * 640 / yawRange, 0, 640);
+    var targetY = clamp(240 + (invertY ? -1 : 1) * (pitchRaw - pointer.basePitch) * 480 / pitchRange, 0, 480);
+    pointer.x += (targetX - pointer.x) * 0.35;
+    pointer.y += (targetY - pointer.y) * 0.35;
+    var col = clamp(Math.round(pointer.x * (COLS - 1) / 640), 0, COLS - 1);
+    var row = clamp(Math.round(pointer.y * (ROWS - 1) / 480), 0, ROWS - 1);
+    var next = idx(row, col);
+    if (next === selected) return false;
+    selected = next;
+    render();
+    publish();
+    return true;
+  }
+
+  miraCanvas.createPage({ width:640, height:480 });
+  resetGame();
+
+  var off = null;
+  if (typeof miraCompanion !== 'undefined' && miraCompanion.onFromCompanion) {
+    off = miraCompanion.onFromCompanion(function (message) {
+      if (!message) return;
+      if (message.type === 'newGame' || (message.type === 'action' && message.action === 'new')) {
+        resetGame();
+      } else if (message.type === 'recenter') {
+        resetPointer(); selected = 40; render(); publish();
+      } else if (message.type === 'select') {
+        if (!selectIndex(message.index, true)) return;
+        if (message.reveal) revealSelected();
+        render();
+        publish();
+      } else if (message.type === 'reveal' || (message.type === 'action' && message.action === 'act')) {
+        revealSelected();
+      } else if (message.type === 'flag' || (message.type === 'action' && message.action === 'flag')) {
+        toggleFlag();
+      } else if (message.type === 'nudge') {
+        nudge(message.dx, message.dy);
+      } else if (message.type === 'settings' || message.type === 'head' || message.type === 'headConfig' || message.type === 'invert') {
+        var wasPointerEnabled = pointerEnabled;
+        if (Number.isFinite(Number(message.yawRange))) yawRange = clamp(Number(message.yawRange), 16, 50);
+        if (Number.isFinite(Number(message.pitchRange))) pitchRange = clamp(Number(message.pitchRange), 14, 40);
+        if (message.pointerEnabled != null) pointerEnabled = !!message.pointerEnabled;
+        if (message.enabled != null) pointerEnabled = !!message.enabled;
+        if (message.invertX != null) invertX = !!message.invertX;
+        if (message.invertY != null) invertY = !!message.invertY;
+        if (!wasPointerEnabled && pointerEnabled) resetPointer();
+        render();
+        publish();
+      }
+    });
+  }
+  miraCanvas.animate(function () {
+    if (manualFrames > 0) manualFrames--;
+    updateHeadPointer();
+    return true;
+  });
+  miraCanvas.onInput(function (event) {
+    if (!event || typeof event.type !== 'string') return;
+    if (event.type === 'click') revealSelected();
+    else if (event.type === 'longClick') {
+      if (gameState === 'won' || gameState === 'lost') resetGame();
+      else toggleFlag();
+    } else if (event.type === 'scrollTop') moveLinear(-1);
+    else if (event.type === 'scrollBottom') moveLinear(1);
+    else if (event.type === 'clear') render();
+  });
+  miraCanvas.onStop(function () {
+    if (typeof off === 'function') off();
+    if (typeof miraCompanion !== 'undefined' && miraCompanion.sendToCompanion) {
+      miraCompanion.sendToCompanion({ type:'stop' });
+    }
+  });
+})();
+</script>
+</body>
+</html>

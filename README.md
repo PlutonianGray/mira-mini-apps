@@ -1,126 +1,90 @@
-# Mira Mini Apps
+mira-mini-apps
 
-Community-made mini apps, games, utilities, and experiments for **Mira smart glasses**, built using the public Mira SDK.
+Community-made mini apps, games, utilities, and experiments for Mira smart glasses using the public Mira SDK.
 
-This repository is intended as a simple place to collect and share small Mira applications that can be loaded through the Mira app-creation interface.
+Current status
 
-## Current Apps
+> [!IMPORTANT]
+> These apps have passed code review and static validation, but they have not yet been tested on physical Mira glasses because I am still waiting for my glasses to arrive. Hardware-tested updates will follow when possible.
 
-### Sudoku
+Each app is a self-contained HTML file containing both the glasses app and its optional phone companion.
 
-A Sudoku game designed for the Mira glasses display and input system.
+Games
 
-Features include:
+Minesweeper
 
-- Glasses-friendly 640×480 interface
-- Grid-based navigation
-- Mira touch/ring controls
-- Head-controlled selection support
-- Self-contained HTML package
+Classic Minesweeper adapted for Mira’s 640×480 display.
 
-### Minesweeper
+• 9×9 board with 10 mines
+• First revealed cell and its surrounding cells are always mine-free
+• Automatic opening of connected empty areas
+• Direct head-position cell selection with adjustable horizontal and vertical ranges
+• Ring/touch-bar navigation when head selection is unavailable or not desired
+• Phone companion controls for starting a new game, recentering, sensitivity, and X/Y inversion
 
-A classic Minesweeper-style game adapted for Mira glasses.
+Glasses controls
 
-Features include:
+• Head movement: select a cell
+• Swipe/scroll: move one cell at a time
+• Tap: reveal the selected cell
+• Long-press: place or remove a flag
+• Tap after winning or losing: start a new game
 
-- 9×9 beginner board
-- 10 mines
-- First-click safety
-- Automatic clearing of empty areas
-- Flags
-- Win and loss detection
-- Touch/ring controls
-- Head-controlled cell selection
-- Phone companion settings for head-pointer sensitivity
-- Self-contained HTML package
+Mira Sudoku
 
-### Fleet Grid
+A full Sudoku game designed for the Mira display, ring/touch bar, head selection, and phone companion.
 
-A classic naval strategy game designed for the Mira glasses display and controls.
+• Easy, medium, and hard difficulty levels
+• Nine transformations per difficulty, for 27 puzzle variations
+• Conflict highlighting and incorrect-entry checking
+• Automatic solved-puzzle detection
+• Hints, undo, erase, and new-puzzle controls
+• Optional direct head-position selection with adjustable horizontal and vertical ranges
+• Phone companion with a tappable board and number keypad
 
-Place your fleet on a grid, then search the opposing grid and attempt to sink the enemy fleet before yours is destroyed.
+Glasses controls
 
-Features include:
+• Swipe/scroll: move among editable cells
+• Tap: enter number-selection mode
+• Swipe/scroll while editing: choose 0–9 (0 erases)
+• Tap while editing: place the chosen number
+• Long-press while editing: cancel entry
+• Long-press while selecting: erase the selected cell
 
-- Grid-based naval strategy gameplay
-- Player and opponent fleets
-- Ship placement
-- Hit and miss tracking
-- Win and loss detection
-- Mira touch/ring navigation
-- Head-controlled grid selection
-- Glasses-friendly interface
-- Self-contained HTML package
+Fleet Grid
 
-## Installation
+A Battleship-style strategy game in which you compete against a computer-controlled fleet.
 
-Each Mira app is provided as a single `.html` file.
+• 10×10 targeting grid
+• Automatically placed fleets using standard ship sizes: 5, 4, 3, 3, and 2
+• Direct head aiming with adjustable horizontal and vertical spans
+• Manual ring/touch-bar aiming as a fallback
+• Computer opponent that continues searching around successful hits
+• On-screen shot, hit, and remaining-fleet status
+• Phone companion controls for starting a new game, recentering, sensitivity, and X/Y inversion
 
-To use an app:
+Glasses controls
 
-1. Download or copy the desired `.html` file.
-2. Open the Mira app-creation interface on your iPhone.
-3. Create a new mini app.
-4. Paste or import the HTML source.
-5. Save the app.
-6. Connect your Mira glasses.
-7. Run the app from the Mira app.
+• Head movement: aim at an enemy cell
+• Tap: fire at the selected cell
+• Swipe/scroll: switch to manual aiming and move one cell at a time
+• Long-press: recenter and return to head aiming
+• Tap after the game ends: start a new game
 
-No additional JavaScript libraries, packages, or external files are required unless specifically noted.
+Adding an app to Mira
 
-## Controls
+1. Open the desired HTML file and copy its entire contents, beginning with <!doctype html> and ending with </html>.
+2. In the Mira app, choose Build a Mira App.
+3. Paste the complete source into the app-code field.
+4. Select Check code and confirm that the glasses section reports Supported — ready to add.
+5. Save the app, connect the glasses, and select Run.
 
-Controls may vary by app, but Mira mini apps can use standard glasses inputs such as:
+The phone companion may display Waiting for the glasses… until the glasses are connected and the app is running. That is expected.
 
-- Tap / click
-- Long press
-- Swipe up
-- Swipe down
-- Mira ring controls
-- Head movement using the glasses' IMU sensors
+Development note
 
-Individual apps include their own control instructions.
+These mini apps were created with ChatGPT and reviewed against the public Mira mini-app API. They are independent community projects and are not official Mira software.
 
-## Hardware Testing
+Repository
 
-These apps are being developed using Mira's public SDK.
-
-Some apps may initially be created and tested in the Mira iPhone app before being tested on physical Mira glasses.
-
-Because the Mira SDK and hardware ecosystem are still relatively new, behavior may change as Mira updates its firmware, SDK, or iPhone app.
-
-If you try one of these apps on actual Mira glasses and find a problem, feedback is welcome.
-
-## About the Code
-
-The apps in this repository are intentionally designed to be:
-
-- Small
-- Self-contained
-- Easy to inspect
-- Easy to modify
-- Easy to share
-- Suitable for learning the Mira SDK
-
-Most apps consist of one combined HTML file containing both the Mira glasses code and, when needed, an optional iPhone companion interface.
-
-## Community
-
-If you own Mira glasses and would like to try one of these apps, feel free to download the source and experiment with it.
-
-Suggestions, bug reports, improvements, and ideas for new Mira mini apps are welcome.
-
-## Disclaimer
-
-These are unofficial community-created applications.
-
-They are not produced, endorsed, or supported by Mira.
-
-Use them at your own discretion, particularly while the Mira SDK and hardware platform are still evolving.
-
-## License
-
-Unless otherwise noted, the code in this repository is intended for personal experimentation and community sharing.
-
-A formal open-source license may be added later.
+github.com/PlutonianGray/mira-mini-apps

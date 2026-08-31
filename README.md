@@ -1,90 +1,86 @@
-mira-mini-apps
+# Mira Mini Apps
 
-Community-made mini apps, games, utilities, and experiments for Mira smart glasses using the public Mira SDK.
+Community\-made mini apps, games, utilities, and experiments for Mira smart glasses, built using the public Mira SDK\.
 
-Current status
+This repository is intended as a simple place to collect and share small Mira applications that can be loaded through the Mira app\-creation interface\.
 
-> [!IMPORTANT]
-> These apps have passed code review and static validation, but they have not yet been tested on physical Mira glasses because I am still waiting for my glasses to arrive. Hardware-tested updates will follow when possible.
+## Current Apps
 
-Each app is a self-contained HTML file containing both the glasses app and its optional phone companion.
+### Sudoku
 
-Games
+A Sudoku game designed for the Mira glasses display and input system\.
 
-Minesweeper
+Features include:
 
-Classic Minesweeper adapted for Mira’s 640×480 display.
+- Glasses\-friendly 640×480 interface
+- Easy, medium, and hard difficulty levels
+- 27 puzzle variations
+- Ring, touch\-bar, head\-position, and phone controls
+- Conflict highlighting and automatic completion detection
+- Check, hint, undo, erase, and new\-puzzle options
+- Phone companion with a tappable board and number keypad
 
-• 9×9 board with 10 mines
-• First revealed cell and its surrounding cells are always mine-free
-• Automatic opening of connected empty areas
-• Direct head-position cell selection with adjustable horizontal and vertical ranges
-• Ring/touch-bar navigation when head selection is unavailable or not desired
-• Phone companion controls for starting a new game, recentering, sensitivity, and X/Y inversion
+Glasses controls:
 
-Glasses controls
+- Swipe to move among editable cells
+- Tap to choose and enter a number
+- Long\-press to erase or cancel an entry
 
-• Head movement: select a cell
-• Swipe/scroll: move one cell at a time
-• Tap: reveal the selected cell
-• Long-press: place or remove a flag
-• Tap after winning or losing: start a new game
+### Minesweeper
 
-Mira Sudoku
+A classic Minesweeper game adapted for the Mira glasses display and input system\.
 
-A full Sudoku game designed for the Mira display, ring/touch bar, head selection, and phone companion.
+Features include:
 
-• Easy, medium, and hard difficulty levels
-• Nine transformations per difficulty, for 27 puzzle variations
-• Conflict highlighting and incorrect-entry checking
-• Automatic solved-puzzle detection
-• Hints, undo, erase, and new-puzzle controls
-• Optional direct head-position selection with adjustable horizontal and vertical ranges
-• Phone companion with a tappable board and number keypad
+- Glasses\-friendly 640×480 interface
+- 9×9 board with 10 mines
+- A guaranteed safe first selection and surrounding area
+- Automatic opening of connected empty cells
+- Head\-position cell selection with adjustable sensitivity
+- Ring or touch\-bar navigation, revealing, and flagging
+- Phone controls for starting a new game, recentering, and adjusting head selection
 
-Glasses controls
+Glasses controls:
 
-• Swipe/scroll: move among editable cells
-• Tap: enter number-selection mode
-• Swipe/scroll while editing: choose 0–9 (0 erases)
-• Tap while editing: place the chosen number
-• Long-press while editing: cancel entry
-• Long-press while selecting: erase the selected cell
+- Move your head or swipe to select a cell
+- Tap to reveal a cell
+- Long\-press to place or remove a flag
 
-Fleet Grid
+### Fleet Grid
 
-A Battleship-style strategy game in which you compete against a computer-controlled fleet.
+A Battleship\-style strategy game designed for the Mira glasses display and input system\.
 
-• 10×10 targeting grid
-• Automatically placed fleets using standard ship sizes: 5, 4, 3, 3, and 2
-• Direct head aiming with adjustable horizontal and vertical spans
-• Manual ring/touch-bar aiming as a fallback
-• Computer opponent that continues searching around successful hits
-• On-screen shot, hit, and remaining-fleet status
-• Phone companion controls for starting a new game, recentering, sensitivity, and X/Y inversion
+Features include:
 
-Glasses controls
+- Glasses\-friendly 640×480 interface
+- 10×10 targeting grid
+- Automatically placed fleets with standard ship sizes
+- A computer\-controlled opposing fleet
+- Head\-position aiming with adjustable sensitivity
+- Ring or touch\-bar manual aiming
+- Shot, hit, and remaining\-fleet status
+- Phone controls for starting a new game, recentering, and adjusting head aim
 
-• Head movement: aim at an enemy cell
-• Tap: fire at the selected cell
-• Swipe/scroll: switch to manual aiming and move one cell at a time
-• Long-press: recenter and return to head aiming
-• Tap after the game ends: start a new game
+Glasses controls:
 
-Adding an app to Mira
+- Move your head to aim at a cell
+- Tap to fire
+- Swipe to switch to manual cell\-by\-cell aiming
+- Long\-press to recenter head aiming
 
-1. Open the desired HTML file and copy its entire contents, beginning with <!doctype html> and ending with </html>.
-2. In the Mira app, choose Build a Mira App.
-3. Paste the complete source into the app-code field.
-4. Select Check code and confirm that the glasses section reports Supported — ready to add.
-5. Save the app, connect the glasses, and select Run.
+## Adding an App to Mira
 
-The phone companion may display Waiting for the glasses… until the glasses are connected and the app is running. That is expected.
+1. Open the desired HTML file and copy its complete contents\.
+2. Select **Build a Mira App** in the Mira app\.
+3. Paste the code into the app\-code field\.
+4. Select **Check code**, save the app, and run it after connecting the glasses\.
 
-Development note
+The phone companion may display **Waiting for the glasses…** until the glasses are connected and the app is running\. This is normal\.
 
-These mini apps were created with ChatGPT and reviewed against the public Mira mini-app API. They are independent community projects and are not official Mira software.
+## Testing Status
 
-Repository
+These apps have passed code review and static validation, but they have not yet been tested on physical Mira glasses because I am still waiting for my glasses to arrive\. Hardware\-tested updates will follow when possible\.
 
-github.com/PlutonianGray/mira-mini-apps
+## Development
+
+These apps were created with ChatGPT and reviewed against the public Mira mini\-app API\. They are independent community projects and are not official Mira software\.

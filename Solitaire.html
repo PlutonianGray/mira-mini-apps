@@ -1,0 +1,959 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <script type="application/mira-manifest+json">
+  { "title": "SoliMira", "description": "Compact Klondike-style solitaire for Mira glasses", "phoneIcon": "star" }
+  </script>
+  <style>
+    * { box-sizing:border-box; }
+    body {
+      margin:0; padding:24px 18px 40px;
+      font:16px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      color:#214f2c; background:#f3faf4;
+    }
+    #mira-companion-root { max-width:760px; margin:0 auto; }
+    h1 { margin:0 0 6px; font-size:30px; line-height:1.15; }
+    .sub { margin:0 0 24px; color:#66846b; font-size:18px; line-height:1.4; }
+    .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+    button {
+      min-height:58px; padding:10px 8px; border:0; border-radius:14px;
+      background:#1f7a37; color:white; font:inherit; font-weight:700;
+    }
+    button:active { transform:translateY(1px); }
+    .secondary { background:#e8f4ea; color:#285f35; border:1px solid #bad9bf; }
+    .wide { grid-column:1 / -1; }
+    .stats {
+      margin-top:22px; display:grid; grid-template-columns:repeat(4,minmax(0,1fr));
+      gap:8px;
+    }
+    .stat { padding:12px 8px; border:1px solid #c5dfc7; border-radius:12px; background:#fff; text-align:center; }
+    .stat b { display:block; font-size:20px; }
+    .stat span { display:block; margin-top:2px; color:#6b876f; font-size:12px; }
+    #state {
+      margin-top:18px; padding:16px; min-height:60px; border:1px solid #c5dfc7;
+      border-radius:14px; background:#fff; color:#386744; font-size:17px; line-height:1.45;
+    }
+    .help { margin:18px 2px 0; color:#6b876f; font-size:14px; line-height:1.45; }
+    @media (max-width:560px) {
+      body { padding:22px 16px 34px; }
+      .grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .stats { grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .wide { grid-column:auto; }
+    }
+  </style>
+</head>
+<body>
+  <main id="mira-companion-root">
+    <h1>SoliMira</h1>
+    <p class="sub">Backup controls for the glasses Solitaire game.</p>
+
+    <div class="grid">
+      <button type="button" data-action="previous">Previous</button>
+      <button type="button" data-action="act">Tap / select</button>
+      <button type="button" data-action="next">Next</button>
+      <button type="button" data-action="auto">Auto home</button>
+      <button type="button" class="secondary" data-action="cancel">Cancel</button>
+      <button type="button" class="secondary" data-action="undo">Undo</button>
+      <button type="button" class="secondary wide" data-action="new">New game</button>
+    </div>
+
+    <div class="stats" aria-label="Game status">
+      <div class="stat"><b id="moves">--</b><span>Moves</span></div>
+      <div class="stat"><b id="home">--/52</b><span>Home</span></div>
+      <div class="stat"><b id="stock">--</b><span>Stock</span></div>
+      <div class="stat"><b id="waste">--</b><span>Waste</span></div>
+    </div>
+
+    <div id="state" aria-live="polite">Waiting for the glasses...</div>
+    <p class="help">On the glasses: swipe to move focus, tap to act, and hold for context actions (auto-home, undo, cancel, or a new game). Lowercase ranks are red (hearts and diamonds); suit symbols remain visible. T is ten.</p>
+  </main>
+
+  <script>
+  (function () {
+    var state = document.getElementById('state');
+    var moves = document.getElementById('moves');
+    var home = document.getElementById('home');
+    var stock = document.getElementById('stock');
+    var waste = document.getElementById('waste');
+
+    document.querySelectorAll('[data-action]').forEach(function (button) {
+      button.addEventListener('click', function () {
+        if (typeof miraCompanion !== 'undefined' && miraCompanion.sendToApp) {
+          miraCompanion.sendToApp({ type:'action', action:button.dataset.action });
+        } else {
+          state.textContent = 'Waiting for the glasses...';
+        }
+      });
+    });
+
+    if (typeof miraCompanion !== 'undefined' && miraCompanion.onFromApp) {
+      miraCompanion.onFromApp(function (msg) {
+        if (!msg) return;
+        if (msg.type === 'state') {
+          moves.textContent = String(msg.moves);
+          home.textContent = String(msg.home) + '/52';
+          stock.textContent = String(msg.stock);
+          waste.textContent = msg.wasteCard ? String(msg.wasteCard) : String(msg.waste || '--');
+          state.textContent = msg.won ? 'You won!' : (msg.message || 'Connected');
+        } else if (msg.type === 'stop') {
+          moves.textContent = '--';
+          home.textContent = '--/52';
+          stock.textContent = '--';
+          waste.textContent = '--';
+          state.textContent = 'Waiting for the glasses...';
+        }
+      });
+    }
+
+    if (typeof miraCompanion !== 'undefined' && miraCompanion.sendToApp) {
+      miraCompanion.sendToApp({ type:'action', action:'sync' });
+    }
+  })();
+  </script>
+
+  <script type="mira-app">
+(function () {
+    'use strict';
+
+    var INK = 15;
+    var MID = 8;
+    var SUITS = ['S', 'H', 'D', 'C'];
+    var SUIT_GLYPHS = { S:'♠', H:'♥', D:'♦', C:'♣' };
+    var RANKS = ['A','2','3','4','5','6','7','8','9','T','J','Q','K'];
+    var COL_LINES = 6;
+    var COL_PITCH = 26;
+
+    var stock = [];
+    var waste = [];
+    var foundations = { S:[], H:[], D:[], C:[] };
+    var tableau = [[],[],[],[],[],[],[]];
+
+    var focusIndex = 0;
+    var picker = null;
+    var selected = null;
+    var moves = 0;
+    var won = false;
+    var message = 'Tap STK to draw';
+    var history = [];
+
+    miraCanvas.createPage({ width:640, height:480 });
+
+    function suitGlyph(suit) {
+      return SUIT_GLYPHS[suit] || suit;
+    }
+
+    function cardColor(card) {
+      return (card.suit === 'H' || card.suit === 'D') ? 1 : 0;
+    }
+
+    function cardLabel(card) {
+      if (!card) return '--';
+      var rank = RANKS[card.rank - 1];
+      if (cardColor(card) === 1) rank = rank.toLowerCase();
+      return rank + suitGlyph(card.suit);
+    }
+
+    function cloneCard(card) {
+      return { suit:card.suit, rank:card.rank, faceUp:card.faceUp, id:card.id };
+    }
+
+    function clonePile(pile) {
+      var out = [];
+      for (var i = 0; i < pile.length; i++) out.push(cloneCard(pile[i]));
+      return out;
+    }
+
+    function snapshot() {
+      return {
+        stock:clonePile(stock),
+        waste:clonePile(waste),
+        foundations:{
+          S:clonePile(foundations.S),
+          H:clonePile(foundations.H),
+          D:clonePile(foundations.D),
+          C:clonePile(foundations.C)
+        },
+        tableau:[
+          clonePile(tableau[0]), clonePile(tableau[1]), clonePile(tableau[2]),
+          clonePile(tableau[3]), clonePile(tableau[4]), clonePile(tableau[5]),
+          clonePile(tableau[6])
+        ],
+        moves:moves,
+        won:won
+      };
+    }
+
+    function pushHistory() {
+      history.push(snapshot());
+      if (history.length > 80) history.shift();
+    }
+
+    function restore(snap) {
+      stock = snap.stock;
+      waste = snap.waste;
+      foundations = snap.foundations;
+      tableau = snap.tableau;
+      moves = snap.moves;
+      won = snap.won;
+      picker = null;
+      selected = null;
+    }
+
+    function makeDeck() {
+      var deck = [];
+      for (var s = 0; s < SUITS.length; s++) {
+        for (var r = 1; r <= 13; r++) {
+          deck.push({ suit:SUITS[s], rank:r, faceUp:false, id:SUITS[s] + ':' + r });
+        }
+      }
+      return deck;
+    }
+
+    function shuffle(deck) {
+      for (var i = deck.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1));
+        var t = deck[i]; deck[i] = deck[j]; deck[j] = t;
+      }
+    }
+
+    function newGame() {
+      var deck = makeDeck();
+      shuffle(deck);
+
+      stock = [];
+      waste = [];
+      foundations = { S:[], H:[], D:[], C:[] };
+      tableau = [[],[],[],[],[],[],[]];
+      focusIndex = 0;
+      picker = null;
+      selected = null;
+      moves = 0;
+      won = false;
+      history = [];
+      message = 'Tap STK to draw';
+
+      for (var col = 0; col < 7; col++) {
+        for (var row = 0; row <= col; row++) {
+          var card = deck.pop();
+          card.faceUp = (row === col);
+          tableau[col].push(card);
+        }
+      }
+
+      while (deck.length) {
+        var rest = deck.pop();
+        rest.faceUp = false;
+        stock.push(rest);
+      }
+
+      render();
+    }
+
+    function focusTarget() {
+      if (focusIndex === 0) return { zone:'stock', index:0 };
+      if (focusIndex === 1) return { zone:'waste', index:0 };
+      if (focusIndex >= 2 && focusIndex <= 5) return { zone:'foundation', index:focusIndex - 2 };
+      return { zone:'tableau', index:focusIndex - 6 };
+    }
+
+    function cycleFocus(delta) {
+      focusIndex = (focusIndex + delta + 13) % 13;
+      message = selected ? destMessage(getSelectedCards()) : 'Tap to act';
+      render();
+    }
+
+    function firstFaceUpIndex(col) {
+      var pile = tableau[col];
+      for (var i = 0; i < pile.length; i++) if (pile[i].faceUp) return i;
+      return pile.length;
+    }
+
+    function isValidRun(cards) {
+      if (!cards.length) return false;
+      for (var i = 1; i < cards.length; i++) {
+        var a = cards[i - 1];
+        var b = cards[i];
+        if (!a.faceUp || !b.faceUp) return false;
+        if (a.rank !== b.rank + 1) return false;
+        if (cardColor(a) === cardColor(b)) return false;
+      }
+      return true;
+    }
+
+    function beginPicker(col) {
+      var pile = tableau[col];
+      var first = firstFaceUpIndex(col);
+      if (!pile.length) {
+        message = 'Empty column';
+        render();
+        return;
+      }
+      if (first >= pile.length) {
+        message = 'No face-up card';
+        render();
+        return;
+      }
+      if (first === pile.length - 1) {
+        selected = { source:'tableau', col:col, cardIndex:first };
+        picker = null;
+        message = destMessage(getSelectedCards());
+        render();
+        return;
+      }
+      picker = { col:col, index:pile.length - 1 };
+      message = 'Pick ' + cardLabel(pile[picker.index]);
+      render();
+    }
+
+    function cyclePicker(delta) {
+      if (!picker) return;
+      var pile = tableau[picker.col];
+      var first = firstFaceUpIndex(picker.col);
+      var next = picker.index + delta;
+      if (next < first) next = pile.length - 1;
+      if (next >= pile.length) next = first;
+      picker.index = next;
+      var count = pile.length - picker.index;
+      message = 'Pick ' + cardLabel(pile[picker.index]) + (count > 1 ? ' x' + count : '');
+      render();
+    }
+
+    function selectFromPicker() {
+      if (!picker) return;
+      var pile = tableau[picker.col];
+      selected = { source:'tableau', col:picker.col, cardIndex:picker.index };
+      picker = null;
+      message = destMessage(getSelectedCards());
+      render();
+    }
+
+    function selectWaste() {
+      if (selected && selected.source === 'waste') {
+        selected = null;
+        message = 'Selection cleared';
+        render();
+        return;
+      }
+      if (!waste.length) {
+        message = 'Waste is empty';
+        render();
+        return;
+      }
+      selected = { source:'waste' };
+      message = destMessage(getSelectedCards());
+      render();
+    }
+
+    function selectFoundation(suit) {
+      if (selected && selected.source === 'foundation' && selected.suit === suit) {
+        selected = null;
+        message = 'Selection cleared';
+        render();
+        return;
+      }
+      var pile = foundations[suit];
+      if (!pile.length) {
+        message = 'Foundation empty';
+        render();
+        return;
+      }
+      selected = { source:'foundation', suit:suit };
+      message = destMessage(getSelectedCards());
+      render();
+    }
+
+    function getSelectedCards() {
+      if (!selected) return [];
+      if (selected.source === 'waste') {
+        return waste.length ? [waste[waste.length - 1]] : [];
+      }
+      if (selected.source === 'foundation') {
+        var fp = foundations[selected.suit];
+        return fp.length ? [fp[fp.length - 1]] : [];
+      }
+      if (selected.source === 'tableau') {
+        return tableau[selected.col].slice(selected.cardIndex);
+      }
+      return [];
+    }
+
+    function removeSelected() {
+      if (!selected) return [];
+      var moved;
+      if (selected.source === 'waste') {
+        moved = waste.length ? [waste.pop()] : [];
+      } else if (selected.source === 'foundation') {
+        var fp = foundations[selected.suit];
+        moved = fp.length ? [fp.pop()] : [];
+      } else if (selected.source === 'tableau') {
+        moved = tableau[selected.col].splice(selected.cardIndex);
+      } else {
+        moved = [];
+      }
+      return moved;
+    }
+
+    function flipExposed(col) {
+      var pile = tableau[col];
+      if (pile.length && !pile[pile.length - 1].faceUp) pile[pile.length - 1].faceUp = true;
+    }
+
+    function canMoveToTableau(cards, col) {
+      if (!isValidRun(cards)) return false;
+      var first = cards[0];
+      var dest = tableau[col];
+      if (!dest.length) return first.rank === 13;
+      var top = dest[dest.length - 1];
+      return top.faceUp && top.rank === first.rank + 1 && cardColor(top) !== cardColor(first);
+    }
+
+    function canMoveToFoundation(cards, suit) {
+      if (cards.length !== 1) return false;
+      var card = cards[0];
+      if (card.suit !== suit) return false;
+      return card.rank === foundations[suit].length + 1;
+    }
+
+    function destMessage(cards) {
+      if (!cards.length) return 'Nothing selected';
+      var dest = [];
+      var i;
+      for (i = 0; i < 7; i++) {
+        if (selected && selected.source === 'tableau' && selected.col === i) continue;
+        if (canMoveToTableau(cards, i)) dest.push(String(i + 1));
+      }
+      if (cards.length === 1) {
+        for (i = 0; i < SUITS.length; i++) {
+          if (canMoveToFoundation(cards, SUITS[i])) dest.push(suitGlyph(SUITS[i]));
+        }
+      }
+      if (!dest.length) return 'No legal drop - hold cancel';
+      var text = 'Drop ' + dest.join(' ');
+      return text.length > 36 ? text.slice(0, 36) : text;
+    }
+
+    function moveToTableau(col) {
+      if (!selected) return;
+      if (selected.source === 'tableau' && selected.col === col) {
+        selected = null;
+        message = 'Selection cleared';
+        render();
+        return;
+      }
+
+      var cards = getSelectedCards();
+      if (!canMoveToTableau(cards, col)) {
+        message = 'That move is not legal';
+        render();
+        return;
+      }
+
+      pushHistory();
+      var sourceCol = selected.source === 'tableau' ? selected.col : -1;
+      var moved = removeSelected();
+      for (var i = 0; i < moved.length; i++) tableau[col].push(moved[i]);
+      if (sourceCol >= 0) flipExposed(sourceCol);
+      moves++;
+      message = 'Moved ' + cardLabel(moved[0]) + (moved.length > 1 ? ' x' + moved.length : '');
+      selected = null;
+      checkWin();
+      render();
+    }
+
+    function moveToFoundation(suit) {
+      if (!selected) return;
+      if (selected.source === 'foundation' && selected.suit === suit) {
+        selected = null;
+        message = 'Selection cleared';
+        render();
+        return;
+      }
+
+      var cards = getSelectedCards();
+      if (!canMoveToFoundation(cards, suit)) {
+        message = 'That card cannot go home';
+        render();
+        return;
+      }
+
+      pushHistory();
+      var sourceCol = selected.source === 'tableau' ? selected.col : -1;
+      var moved = removeSelected();
+      foundations[suit].push(moved[0]);
+      if (sourceCol >= 0) flipExposed(sourceCol);
+      moves++;
+      message = cardLabel(moved[0]) + ' moved home';
+      selected = null;
+      checkWin();
+      render();
+    }
+
+    function drawStock() {
+      if (!stock.length && !waste.length) {
+        message = 'Stock is empty';
+        render();
+        return;
+      }
+
+      pushHistory();
+      if (stock.length) {
+        var card = stock.pop();
+        card.faceUp = true;
+        waste.push(card);
+        moves++;
+        message = 'Drew ' + cardLabel(card);
+        render();
+        return;
+      }
+
+      while (waste.length) {
+        var recycled = waste.pop();
+        recycled.faceUp = false;
+        stock.push(recycled);
+      }
+      moves++;
+      message = 'Stock recycled';
+      render();
+    }
+
+    function autoHomeOne() {
+      if (waste.length) {
+        var wasteCard = waste[waste.length - 1];
+        if (canMoveToFoundation([wasteCard], wasteCard.suit)) {
+          foundations[wasteCard.suit].push(waste.pop());
+          moves++;
+          return true;
+        }
+      }
+      for (var col = 0; col < 7; col++) {
+        var pile = tableau[col];
+        if (!pile.length) continue;
+        var top = pile[pile.length - 1];
+        if (!top.faceUp) continue;
+        if (canMoveToFoundation([top], top.suit)) {
+          foundations[top.suit].push(pile.pop());
+          flipExposed(col);
+          moves++;
+          return true;
+        }
+      }
+      return false;
+    }
+
+    function tryAutoHome() {
+      if (picker) picker = null;
+
+      if (selected) {
+        var chosen = getSelectedCards();
+        if (chosen.length === 1 && canMoveToFoundation(chosen, chosen[0].suit)) {
+          moveToFoundation(chosen[0].suit);
+        } else {
+          message = chosen.length > 1 ? 'Only one card can go home' : 'Selected card cannot go home';
+          render();
+        }
+        return;
+      }
+
+      var probe = snapshot();
+      var count = 0;
+      var safety = 0;
+      while (safety++ < 52 && autoHomeOne()) count++;
+
+      if (count === 0) {
+        message = 'Nothing to auto-move';
+        render();
+        return;
+      }
+
+      history.push(probe);
+      if (history.length > 80) history.shift();
+      message = count === 1 ? 'Homed 1 card' : ('Homed ' + count + ' cards');
+      checkWin();
+      render();
+    }
+
+    function undo() {
+      if (!history.length) {
+        message = 'Nothing to undo';
+        render();
+        return;
+      }
+      restore(history.pop());
+      message = 'Undid last move';
+      render();
+    }
+
+    function checkWin() {
+      var total = 0;
+      for (var i = 0; i < SUITS.length; i++) total += foundations[SUITS[i]].length;
+      won = (total === 52);
+      if (won) message = 'You won! Hold STK for new';
+    }
+
+    function foundationCount() {
+      var total = 0;
+      for (var i = 0; i < SUITS.length; i++) total += foundations[SUITS[i]].length;
+      return total;
+    }
+
+    function shortMessage(text) {
+      text = String(text || '');
+      return text.length > 36 ? text.slice(0, 36) : text;
+    }
+
+    function topSlotText(zone, index) {
+      var target = focusTarget();
+      var focused = !picker && target.zone === zone && (index == null || target.index === index);
+      var prefix = focused ? '>' : ' ';
+
+      if (zone === 'stock') return prefix + 'STK ' + stock.length;
+      if (zone === 'waste') {
+        var mark = (selected && selected.source === 'waste') ? '*' : prefix;
+        return mark + 'W ' + (waste.length ? cardLabel(waste[waste.length - 1]) : '--');
+      }
+
+      var suit = SUITS[index];
+      var pile = foundations[suit];
+      var fMark = ' ';
+      if (selected && selected.source === 'foundation' && selected.suit === suit) fMark = '*';
+      else if (focused) fMark = '>';
+      return fMark + suitGlyph(suit) + ':' + (pile.length ? RANKS[pile[pile.length - 1].rank - 1] : '-');
+    }
+
+    function chosenIndexForColumn(col) {
+      if (picker && picker.col === col) return picker.index;
+      if (selected && selected.source === 'tableau' && selected.col === col) return selected.cardIndex;
+      return tableau[col].length - 1;
+    }
+
+    function visibleFaceWindow(col, remaining, desired) {
+      var pile = tableau[col];
+      var first = firstFaceUpIndex(col);
+      var faceCount = pile.length - first;
+      if (faceCount <= remaining) return { start:first, count:faceCount, top:false, bottom:false };
+
+      for (var count = remaining; count >= 1; count--) {
+        var minStart = Math.max(first, desired - count + 1);
+        var maxStart = Math.min(desired, pile.length - count);
+        if (minStart > maxStart) continue;
+        var start = desired - Math.floor(count / 2);
+        if (start < minStart) start = minStart;
+        if (start > maxStart) start = maxStart;
+        var top = start > first;
+        var bottom = start + count < pile.length;
+        if (count + (top ? 1 : 0) + (bottom ? 1 : 0) <= remaining) {
+          return { start:start, count:count, top:top, bottom:bottom };
+        }
+      }
+
+      return { start:pile.length - 1, count:1, top:true, bottom:false };
+    }
+
+    function columnText(col) {
+      var pile = tableau[col];
+      if (!pile.length) return '(empty)';
+
+      var lines = [];
+      var first = firstFaceUpIndex(col);
+      if (first > 0) lines.push('[' + first + ']');
+
+      var remaining = COL_LINES - lines.length;
+      if (remaining <= 0 || first >= pile.length) return lines.join('\n');
+
+      var desired = chosenIndexForColumn(col);
+      if (desired < first) desired = first;
+      if (desired >= pile.length) desired = pile.length - 1;
+
+      var win = visibleFaceWindow(col, remaining, desired);
+      if (win.top) lines.push('^');
+
+      for (var i = win.start; i < win.start + win.count; i++) {
+        var marker = ' ';
+        if (picker && picker.col === col && picker.index === i) marker = '>';
+        else if (selected && selected.source === 'tableau' && selected.col === col && selected.cardIndex === i) marker = '*';
+        lines.push(marker + cardLabel(pile[i]));
+      }
+
+      if (win.bottom) lines.push('v');
+      return lines.slice(0, COL_LINES).join('\n');
+    }
+
+    function columnHeader(col) {
+      var target = focusTarget();
+      if (picker && picker.col === col) return 'P' + (col + 1);
+      if (selected && selected.source === 'tableau' && selected.col === col) return '*' + (col + 1);
+      if (!picker && target.zone === 'tableau' && target.index === col) return '>' + (col + 1);
+      return ' ' + (col + 1);
+    }
+
+    function hintText() {
+      if (won) return 'Hold STK for a new game';
+      if (picker) return 'Swipe card · Tap pick · Hold back';
+      if (selected) return 'Swipe dest · Tap move · Hold cancel';
+      var target = focusTarget();
+      if (target.zone === 'stock') return 'Swipe focus · Tap draw · Hold new';
+      if (target.zone === 'foundation') return 'Swipe focus · Tap act · Hold undo';
+      return 'Swipe focus · Tap act · Hold auto';
+    }
+
+    function publishState() {
+      if (typeof miraCompanion === 'undefined' || !miraCompanion.sendToCompanion) return;
+      miraCompanion.sendToCompanion({
+        type:'state',
+        moves:moves,
+        home:foundationCount(),
+        stock:stock.length,
+        waste:waste.length,
+        wasteCard:waste.length ? cardLabel(waste[waste.length - 1]) : '--',
+        message:message,
+        won:won,
+        focusIndex:focusIndex,
+        picker:picker ? { col:picker.col, index:picker.index } : null,
+        selected:selected
+      });
+    }
+
+    function cancelSelection() {
+      if (picker) { picker = null; message = 'Picker closed'; }
+      else if (selected) { selected = null; message = 'Selection cleared'; }
+      else message = 'Nothing selected';
+      render();
+    }
+
+    function textBox(x, y, w, h, text, extra) {
+      var box = {
+        kind:'text', x:x, y:y, w:w, h:h,
+        text:text, fill:INK, fontSize:18, lineSpacing:COL_PITCH
+      };
+      if (extra) {
+        for (var key in extra) if (Object.prototype.hasOwnProperty.call(extra, key)) box[key] = extra[key];
+      }
+      return box;
+    }
+
+    function render() {
+      var moveText = moves > 9999 ? '9999+' : String(moves);
+      var stats = 'M ' + moveText + '   HOME ' + foundationCount() + '/52';
+      var title = 'SOLIMIRA';
+
+      miraCanvas.draw('sol:chrome', {
+        kind:'rect', x:0, y:0, w:0, h:0, stroke:0, strokeWidth:0,
+        children:{
+          'sol:chrome:title':{ kind:'text', x:20, y:10, w:280, h:40, text:title, fill:INK, fontSize:32, lineSpacing:40 },
+          'sol:chrome:stats':textBox(318, 16, 302, 26, stats, { align:'right', fill:MID }),
+          'sol:chrome:rule1':{ kind:'line', x1:20, y1:56, x2:620, y2:56, stroke:MID, strokeWidth:1 },
+          'sol:chrome:rule2':{ kind:'line', x1:20, y1:98, x2:620, y2:98, stroke:MID, strokeWidth:1 }
+        }
+      });
+
+      miraCanvas.draw('sol:top', {
+        kind:'rect', x:0, y:0, w:0, h:0, stroke:0, strokeWidth:0,
+        children:{
+          'sol:top:stock':textBox(20, 64, 100, 26, topSlotText('stock'), { align:'center' }),
+          'sol:top:waste':textBox(128, 64, 110, 26, topSlotText('waste'), { align:'center' }),
+          'sol:top:f0':textBox(268, 64, 80, 26, topSlotText('foundation', 0), { align:'center' }),
+          'sol:top:f1':textBox(352, 64, 80, 26, topSlotText('foundation', 1), { align:'center' }),
+          'sol:top:f2':textBox(436, 64, 80, 26, topSlotText('foundation', 2), { align:'center' }),
+          'sol:top:f3':textBox(520, 64, 80, 26, topSlotText('foundation', 3), { align:'center' })
+        }
+      });
+
+      var tabChildren = {};
+      for (var col = 0; col < 7; col++) {
+        var x = 22 + col * 86;
+        tabChildren['sol:tab:h' + col] = textBox(x, 106, 78, 26, columnHeader(col), { align:'center' });
+        tabChildren['sol:tab:c' + col] = textBox(x, 140, 78, 156, columnText(col), { align:'center' });
+      }
+
+      miraCanvas.draw('sol:tableau', {
+        kind:'rect', x:0, y:0, w:0, h:0, stroke:0, strokeWidth:0,
+        children:tabChildren
+      });
+
+      miraCanvas.draw('sol:footer', {
+        kind:'rect', x:0, y:0, w:0, h:0, stroke:0, strokeWidth:0,
+        children:{
+          'sol:footer:status':textBox(20, 310, 600, 26, shortMessage(message), { align:'center' }),
+          'sol:footer:hint':textBox(20, 348, 600, 26, hintText(), { align:'center', fill:MID })
+        }
+      });
+      publishState();
+    }
+
+    function handleClick() {
+      if (picker) {
+        var pickerTarget = focusTarget();
+        if (pickerTarget.zone === 'tableau' && pickerTarget.index === picker.col) {
+          selectFromPicker();
+          return;
+        }
+        picker = null;
+      }
+
+      var target = focusTarget();
+
+      if (selected) {
+        if (target.zone === 'tableau') {
+          moveToTableau(target.index);
+          return;
+        }
+        if (target.zone === 'foundation') {
+          moveToFoundation(SUITS[target.index]);
+          return;
+        }
+        if (target.zone === 'waste' && selected.source === 'waste') {
+          selected = null;
+          message = 'Selection cleared';
+          render();
+          return;
+        }
+        message = 'Choose tableau or foundation';
+        render();
+        return;
+      }
+
+      if (target.zone === 'stock') {
+        drawStock();
+      } else if (target.zone === 'waste') {
+        selectWaste();
+      } else if (target.zone === 'foundation') {
+        selectFoundation(SUITS[target.index]);
+      } else if (target.zone === 'tableau') {
+        beginPicker(target.index);
+      }
+    }
+
+    function handleLongClick() {
+      if (picker) {
+        picker = null;
+        message = 'Picker closed';
+        render();
+        return;
+      }
+
+      if (selected) {
+        selected = null;
+        message = 'Selection cleared';
+        render();
+        return;
+      }
+
+      var target = focusTarget();
+      if (target.zone === 'stock') {
+        newGame();
+        return;
+      }
+      if (target.zone === 'waste' || target.zone === 'tableau') {
+        tryAutoHome();
+        return;
+      }
+      if (target.zone === 'foundation') {
+        undo();
+        return;
+      }
+      render();
+    }
+
+    function applyAction(msg) {
+      if (!msg || msg.type !== 'action') return;
+      if (msg.action === 'previous') {
+        if (picker) cyclePicker(-1); else cycleFocus(-1);
+      } else if (msg.action === 'next') {
+        if (picker) cyclePicker(1); else cycleFocus(1);
+      } else if (msg.action === 'act') {
+        handleClick();
+      } else if (msg.action === 'auto') {
+        tryAutoHome();
+      } else if (msg.action === 'cancel') {
+        cancelSelection();
+      } else if (msg.action === 'new') {
+        newGame();
+      } else if (msg.action === 'undo') {
+        undo();
+      } else if (msg.action === 'sync') {
+        publishState();
+      } else if (msg.action === 'focus' && typeof msg.index === 'number') {
+        var idx = Math.floor(msg.index);
+        if (idx >= 0 && idx < 13) {
+          if (picker && !(focusTargetFrom(idx).zone === 'tableau' && focusTargetFrom(idx).index === picker.col)) {
+            picker = null;
+          }
+          focusIndex = idx;
+          message = selected ? destMessage(getSelectedCards()) : 'Tap to act';
+          render();
+        }
+      } else if (msg.action === 'pick' && typeof msg.col === 'number' && typeof msg.index === 'number') {
+        pickTableauCard(msg.col, msg.index);
+      }
+    }
+
+    function focusTargetFrom(index) {
+      if (index === 0) return { zone:'stock', index:0 };
+      if (index === 1) return { zone:'waste', index:0 };
+      if (index >= 2 && index <= 5) return { zone:'foundation', index:index - 2 };
+      return { zone:'tableau', index:index - 6 };
+    }
+
+    function pickTableauCard(col, cardIndex) {
+      if (col < 0 || col > 6) return;
+      var pile = tableau[col];
+      var first = firstFaceUpIndex(col);
+      if (!pile.length || cardIndex < first || cardIndex >= pile.length) {
+        message = 'Cannot pick that card';
+        render();
+        return;
+      }
+      if (selected && selected.source === 'tableau' && selected.col === col && selected.cardIndex === cardIndex) {
+        selected = null;
+        message = 'Selection cleared';
+        render();
+        return;
+      }
+      if (selected) {
+        focusIndex = 6 + col;
+        moveToTableau(col);
+        return;
+      }
+      selected = { source:'tableau', col:col, cardIndex:cardIndex };
+      picker = null;
+      focusIndex = 6 + col;
+      message = destMessage(getSelectedCards());
+      render();
+    }
+
+    var companionOff = null;
+    if (typeof miraCompanion !== 'undefined' && miraCompanion.onFromCompanion) {
+      companionOff = miraCompanion.onFromCompanion(applyAction);
+    }
+
+    miraCanvas.onInput(function (event) {
+      if (event.type === 'scrollTop') {
+        if (picker) cyclePicker(-1);
+        else cycleFocus(-1);
+      } else if (event.type === 'scrollBottom') {
+        if (picker) cyclePicker(1);
+        else cycleFocus(1);
+      } else if (event.type === 'click') {
+        handleClick();
+      } else if (event.type === 'longClick') {
+        handleLongClick();
+      } else if (event.type === 'clear') {
+        render();
+      }
+    });
+
+    miraCanvas.onStop(function () {
+      if (companionOff) companionOff();
+      if (typeof miraCompanion !== 'undefined' && miraCompanion.sendToCompanion) {
+        miraCompanion.sendToCompanion({ type:'stop' });
+      }
+      miraCanvas.log('SoliMira stopped');
+    });
+
+    newGame();
+  })();
+  </script>
+</body>
+</html>

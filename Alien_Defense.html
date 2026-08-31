@@ -1,0 +1,893 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <script type="application/mira-manifest+json">
+  {
+    "title": "Alien Defense",
+    "description": "A retro fixed-screen alien-defense arcade game for Mira glasses with ring, touch-bar, head steering, and phone controls.",
+    "phoneIcon": "star"
+  }
+  </script>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink:#163b20;
+      --green:#1d7134;
+      --muted:#64806a;
+      --soft:#edf7ef;
+      --line:#bad7c0;
+      --paper:#f5faf6;
+    }
+    * { box-sizing:border-box; }
+    body {
+      margin:0;
+      padding:18px;
+      padding-bottom:max(18px, env(safe-area-inset-bottom));
+      font:16px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      color:var(--ink);
+      background:var(--paper);
+    }
+    #mira-companion-root { max-width:520px; margin:0 auto; }
+    h1 { margin:0 0 4px; font-size:24px; }
+    .sub { margin:0 0 14px; color:var(--muted); line-height:1.4; }
+    .card { padding:14px; border:1px solid var(--line); border-radius:14px; background:#fff; }
+    .controls { display:grid; grid-template-columns:1fr 1fr 1fr; gap:9px; margin-top:12px; }
+    .controls.two { grid-template-columns:1fr 1fr; }
+    button, input { min-height:44px; font:inherit; }
+    button { border:0; border-radius:10px; color:#fff; background:var(--green); font-weight:700; }
+    button.secondary { color:var(--ink); background:#e3f1e6; }
+    button:active { transform:translateY(1px); }
+    #state { margin-top:14px; padding:12px; border-radius:11px; background:var(--soft); white-space:pre-line; line-height:1.4; }
+    .settings { margin-top:14px; padding-top:12px; border-top:1px solid var(--line); }
+    .settings label { display:flex; align-items:center; gap:8px; min-height:38px; }
+    .range-row { display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center; margin-top:6px; }
+    input[type="range"] { width:100%; min-height:32px; accent-color:var(--green); }
+    .fine { margin:8px 0 0; color:var(--muted); font-size:13px; line-height:1.4; }
+  </style>
+</head>
+<body>
+<main id="mira-companion-root">
+  <h1>Alien Defense</h1>
+  <p class="sub">A retro alien-defense arcade game for Mira. Swipe/scroll to move, tap to fire, or steer horizontally with your head.</p>
+
+  <section class="card">
+    <div class="controls">
+      <button id="left" type="button">Left</button>
+      <button id="fire" type="button">Fire</button>
+      <button id="right" type="button">Right</button>
+    </div>
+    <div class="controls two">
+      <button id="recenter" class="secondary" type="button">Recenter Head</button>
+      <button id="newGame" class="secondary" type="button">New Game</button>
+    </div>
+
+    <div id="state">Waiting for the glasses…</div>
+
+    <div class="settings">
+      <label><input id="head" type="checkbox" checked> Head steering</label>
+      <div class="range-row">
+        <label for="yaw">Horizontal head span</label>
+        <span><output id="yawOut">30</output>°</span>
+      </div>
+      <input id="yaw" type="range" min="18" max="60" step="1" value="30">
+      <label><input id="invertX" type="checkbox"> Invert left/right</label>
+      <p class="fine">On the glasses: scroll one way or the other to move, tap to fire, and long-press while looking straight ahead to recenter head steering.</p>
+    </div>
+  </section>
+</main>
+
+<script>
+(function () {
+  var stateEl = document.getElementById('state');
+  var headEl = document.getElementById('head');
+  var yawEl = document.getElementById('yaw');
+  var yawOut = document.getElementById('yawOut');
+  var invertXEl = document.getElementById('invertX');
+  var bestKey = 'alienDefenseBestV1';
+  var legacyBestKey = 'miraInvadersBestV1';
+  var restored = false;
+  var repeatTimer = null;
+
+  function savedBest() {
+    try {
+      var current = Number(localStorage.getItem(bestKey));
+      if (Number.isFinite(current) && current >= 0) return Math.min(99999, Math.floor(current));
+
+      var legacy = Number(localStorage.getItem(legacyBestKey));
+      if (Number.isFinite(legacy) && legacy >= 0) {
+        var migrated = Math.min(99999, Math.floor(legacy));
+        localStorage.setItem(bestKey, String(migrated));
+        return migrated;
+      }
+      return 0;
+    } catch (e) { return 0; }
+  }
+
+  function saveBest(value) {
+    try {
+      var n = Number(value);
+      if (!Number.isFinite(n)) return;
+      localStorage.setItem(bestKey, String(Math.min(99999, Math.max(0, Math.floor(n)))));
+    } catch (e) {}
+  }
+
+  function send(message) {
+    if (typeof miraCompanion !== 'undefined' && miraCompanion && typeof miraCompanion.sendToApp === 'function') {
+      miraCompanion.sendToApp(message);
+    } else {
+      stateEl.textContent = 'Waiting for the glasses…';
+    }
+  }
+
+  function sendPrefs() {
+    yawOut.value = yawEl.value;
+    send({
+      type:'prefs',
+      headEnabled:headEl.checked,
+      yawRange:Number(yawEl.value),
+      invertX:invertXEl.checked
+    });
+  }
+
+  function bindRepeat(id, action) {
+    var el = document.getElementById(id);
+    function stop() {
+      if (repeatTimer) { clearInterval(repeatTimer); repeatTimer = null; }
+    }
+    function start(ev) {
+      if (ev && ev.preventDefault) ev.preventDefault();
+      stop();
+      send({ type:'action', action:action });
+      repeatTimer = setInterval(function () { send({ type:'action', action:action }); }, 90);
+    }
+    el.addEventListener('pointerdown', start);
+    el.addEventListener('pointerup', stop);
+    el.addEventListener('pointercancel', stop);
+    el.addEventListener('pointerleave', stop);
+    el.onclick = function (ev) { if (ev && ev.detail === 0) send({ type:'action', action:action }); };
+  }
+
+  bindRepeat('left', 'left');
+  bindRepeat('right', 'right');
+  document.getElementById('fire').onclick = function () { send({ type:'action', action:'fire' }); };
+  document.getElementById('recenter').onclick = function () { send({ type:'recenter' }); };
+  document.getElementById('newGame').onclick = function () { send({ type:'newGame' }); };
+  headEl.onchange = sendPrefs;
+  yawEl.onchange = sendPrefs;
+  invertXEl.onchange = sendPrefs;
+  yawEl.oninput = function () { yawOut.value = yawEl.value; };
+
+  if (typeof miraCompanion !== 'undefined' && miraCompanion && typeof miraCompanion.onFromApp === 'function') {
+    var stop = miraCompanion.onFromApp(function (m) {
+      if (!m) return;
+      if (m.type === 'stop') {
+        stateEl.textContent = 'Waiting for the glasses…';
+        if (repeatTimer) clearInterval(repeatTimer);
+        if (typeof stop === 'function') stop();
+        return;
+      }
+      if (m.type !== 'state') return;
+
+      if (!restored) {
+        restored = true;
+        send({ type:'restoreBest', best:savedBest() });
+      }
+      if (Number(m.best) > savedBest()) saveBest(m.best);
+
+      stateEl.textContent =
+        'Score ' + (m.score || 0) + ' · Best ' + (m.best || 0) + '\n' +
+        'Wave ' + (m.wave || 1) + ' · Lives ' + (m.lives || 0) + ' · Invaders ' + (m.aliens || 0) + '\n' +
+        (m.status || 'Ready');
+
+      if (m.headEnabled != null) headEl.checked = !!m.headEnabled;
+      if (Number.isFinite(Number(m.yawRange))) {
+        yawEl.value = String(m.yawRange);
+        yawOut.value = yawEl.value;
+      }
+      if (m.invertX != null) invertXEl.checked = !!m.invertX;
+    });
+  }
+})();
+</script>
+
+<script type="mira-app">
+(function () {
+  'use strict';
+
+  var W = 640, H = 480;
+  var INK = 15, BRIGHT = 12, MID = 8, DIM = 5, LOW = 3;
+  var TOP = 64, FLOOR_Y = 448;
+  var ALIEN_COLS = 8, ALIEN_ROWS = 5;
+  var ALIEN_SPACING_X = 58, ALIEN_SPACING_Y = 39;
+  var ALIEN_W = 28, ALIEN_H = 20;
+  var SHIP_Y = 416;
+  var SHIP_HALF_W = 17;
+  var MANUAL_STEP = 22;
+
+  var mode = 'ready';
+  var score = 0;
+  var best = 0;
+  var wave = 1;
+  var lives = 3;
+  var playerX = 320;
+  var invincibleFrames = 0;
+  var aliens = [];
+  var alienCount = 0;
+  var formationX = 91;
+  var formationY = 96;
+  var formationDir = 1;
+  var alienAnim = 0;
+  var alienMoveClock = 0;
+  var alienFireClock = 0;
+  var playerBullet = null;
+  var alienBullets = [];
+  var shields = [];
+  var ufo = null;
+  var ufoClock = 0;
+  var frameCount = 0;
+  var publishClock = -999;
+  var lastPublished = '';
+  var statusNote = 'TAP TO START';
+  var headEnabled = true;
+  var yawRange = 30;
+  var invertX = false;
+  var pointer = { baseYaw:null, x:320 };
+  var manualFrames = 0;
+
+  function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+  function wrap(angle) {
+    while (angle > 180) angle -= 360;
+    while (angle < -180) angle += 360;
+    return angle;
+  }
+  function rectsOverlap(ax, ay, aw, ah, bx, by, bw, bh) {
+    return ax < bx + bw && ax + aw > bx && ay < by + bh && ay + ah > by;
+  }
+  function verticalHit(x, y1, y2, rx, ry, rw, rh) {
+    var top = Math.min(y1, y2);
+    var bottom = Math.max(y1, y2);
+    return x >= rx && x <= rx + rw && bottom >= ry && top <= ry + rh;
+  }
+  function displayScore(value) {
+    var n = Math.max(0, Math.floor(Number(value) || 0));
+    return n > 99999 ? '99999+' : String(n);
+  }
+
+  function resetPointer() {
+    pointer.baseYaw = null;
+    pointer.x = playerX;
+    manualFrames = 0;
+  }
+
+  function makeAliens() {
+    aliens = [];
+    for (var r = 0; r < ALIEN_ROWS; r++) {
+      for (var c = 0; c < ALIEN_COLS; c++) {
+        aliens.push({ row:r, col:c, alive:true });
+      }
+    }
+    alienCount = aliens.length;
+    formationX = 91;
+    formationY = 94 + Math.min(34, (wave - 1) * 4);
+    formationDir = 1;
+    alienAnim = 0;
+    alienMoveClock = 0;
+    alienFireClock = 30;
+  }
+
+  function makeShields() {
+    shields = [];
+    var centers = [98, 246, 394, 542];
+    var pattern = [
+      [-30, 0, 20, 12], [-10, -8, 20, 20], [10, -8, 20, 20], [30, 0, 20, 12],
+      [-30, 12, 20, 12], [30, 12, 20, 12]
+    ];
+    for (var s = 0; s < centers.length; s++) {
+      for (var p = 0; p < pattern.length; p++) {
+        shields.push({
+          x:centers[s] + pattern[p][0],
+          y:352 + pattern[p][1],
+          w:pattern[p][2], h:pattern[p][3], hp:2
+        });
+      }
+    }
+  }
+
+  function prepareRun() {
+    score = 0;
+    wave = 1;
+    lives = 3;
+    playerX = 320;
+    playerBullet = null;
+    alienBullets = [];
+    ufo = null;
+    ufoClock = 420;
+    invincibleFrames = 0;
+    makeAliens();
+    makeShields();
+    resetPointer();
+    statusNote = 'TAP TO START';
+    mode = 'ready';
+  }
+
+  function startPlay() {
+    if (mode === 'gameover') prepareRun();
+    if (mode !== 'ready') return false;
+    mode = 'playing';
+    statusNote = 'DEFEND EARTH';
+    resetPointer();
+    return true;
+  }
+
+  function nextWave() {
+    wave++;
+    playerBullet = null;
+    alienBullets = [];
+    ufo = null;
+    ufoClock = 300 + Math.floor(Math.random() * 360);
+    playerX = 320;
+    invincibleFrames = 80;
+    makeAliens();
+    makeShields();
+    resetPointer();
+    statusNote = 'WAVE ' + wave;
+  }
+
+  function gameOver(reason) {
+    mode = 'gameover';
+    statusNote = reason || 'GAME OVER';
+    if (score > best) best = score;
+    playerBullet = null;
+    alienBullets = [];
+    ufo = null;
+  }
+
+  function fire() {
+    if (mode !== 'playing') return startPlay();
+    if (playerBullet) return false;
+    playerBullet = { x:playerX, y:SHIP_Y - 15 };
+    return true;
+  }
+
+  function manualMove(dir) {
+    if (mode !== 'playing') return false;
+    var next = clamp(playerX + dir * MANUAL_STEP, 26, W - 26);
+    if (next === playerX) return false;
+    playerX = next;
+    pointer.x = playerX;
+    manualFrames = 28;
+    return true;
+  }
+
+  function alienBounds() {
+    var minCol = ALIEN_COLS, maxCol = -1, minRow = ALIEN_ROWS, maxRow = -1;
+    for (var i = 0; i < aliens.length; i++) {
+      if (!aliens[i].alive) continue;
+      minCol = Math.min(minCol, aliens[i].col);
+      maxCol = Math.max(maxCol, aliens[i].col);
+      minRow = Math.min(minRow, aliens[i].row);
+      maxRow = Math.max(maxRow, aliens[i].row);
+    }
+    if (maxCol < 0) return null;
+    return {
+      left:formationX + minCol * ALIEN_SPACING_X,
+      right:formationX + maxCol * ALIEN_SPACING_X + ALIEN_W,
+      top:formationY + minRow * ALIEN_SPACING_Y,
+      bottom:formationY + maxRow * ALIEN_SPACING_Y + ALIEN_H
+    };
+  }
+
+  function moveInterval() {
+    var killed = ALIEN_COLS * ALIEN_ROWS - alienCount;
+    return Math.max(5, 28 - Math.floor(killed * 0.48) - Math.min(8, wave - 1));
+  }
+
+  function erodeShieldsUnderAliens() {
+    var changed = false;
+    for (var s = 0; s < shields.length; s++) {
+      var shield = shields[s];
+      if (shield.hp <= 0) continue;
+      for (var i = 0; i < aliens.length; i++) {
+        var a = aliens[i];
+        if (!a.alive) continue;
+        var ax = formationX + a.col * ALIEN_SPACING_X;
+        var ay = formationY + a.row * ALIEN_SPACING_Y;
+        if (rectsOverlap(ax, ay, ALIEN_W, ALIEN_H, shield.x, shield.y, shield.w, shield.h)) {
+          shield.hp = 0;
+          changed = true;
+          break;
+        }
+      }
+    }
+    return changed;
+  }
+
+  function moveAliens() {
+    alienMoveClock++;
+    if (alienMoveClock < moveInterval()) return false;
+    alienMoveClock = 0;
+    alienAnim = 1 - alienAnim;
+
+    var b = alienBounds();
+    if (!b) return false;
+    var step = 8 + Math.min(4, Math.floor((wave - 1) / 2));
+    var nextLeft = b.left + formationDir * step;
+    var nextRight = b.right + formationDir * step;
+    if (nextLeft < 18 || nextRight > W - 18) {
+      formationDir *= -1;
+      formationY += 14;
+    } else {
+      formationX += formationDir * step;
+    }
+
+    erodeShieldsUnderAliens();
+
+    var after = alienBounds();
+    if (after && after.bottom >= 404) gameOver('ALIENS LANDED');
+    return true;
+  }
+
+  function bottomAlienInColumn(col) {
+    for (var r = ALIEN_ROWS - 1; r >= 0; r--) {
+      var idx = r * ALIEN_COLS + col;
+      if (aliens[idx] && aliens[idx].alive) return aliens[idx];
+    }
+    return null;
+  }
+
+  function fireAlienBullet() {
+    alienFireClock++;
+    var limit = Math.max(35, 78 - wave * 4 - Math.floor((ALIEN_COLS * ALIEN_ROWS - alienCount) * 0.5));
+    if (alienFireClock < limit) return false;
+    alienFireClock = 0;
+    var candidates = [];
+    for (var c = 0; c < ALIEN_COLS; c++) {
+      var a = bottomAlienInColumn(c);
+      if (a) candidates.push(a);
+    }
+    if (!candidates.length) return false;
+    var maxBullets = Math.min(5, 2 + Math.floor(wave / 2));
+    if (alienBullets.length >= maxBullets) return false;
+    var shooter = candidates[Math.floor(Math.random() * candidates.length)];
+    alienBullets.push({
+      x:formationX + shooter.col * ALIEN_SPACING_X + ALIEN_W / 2,
+      y:formationY + shooter.row * ALIEN_SPACING_Y + ALIEN_H + 3
+    });
+    return true;
+  }
+
+  function scoreForRow(row) {
+    if (row === 0) return 30;
+    if (row <= 2) return 20;
+    return 10;
+  }
+
+  function hitShield(x, y1, y2) {
+    for (var i = 0; i < shields.length; i++) {
+      var s = shields[i];
+      if (s.hp > 0 && verticalHit(x, y1, y2, s.x, s.y, s.w, s.h)) {
+        s.hp--;
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function updatePlayerBullet() {
+    if (!playerBullet) return false;
+    playerBullet.y -= 9;
+    var y1 = playerBullet.y;
+    var y2 = playerBullet.y + 9;
+    if (y2 < TOP) {
+      playerBullet = null;
+      return true;
+    }
+
+    if (ufo && verticalHit(playerBullet.x, y1, y2, ufo.x, 70, 40, 15)) {
+      var bonus = [50, 100, 150, 200][Math.floor(Math.random() * 4)];
+      score += bonus;
+      if (score > best) best = score;
+      ufo = null;
+      playerBullet = null;
+      statusNote = 'BONUS +' + bonus;
+      publish(true);
+      return true;
+    }
+
+    for (var i = 0; i < aliens.length; i++) {
+      var a = aliens[i];
+      if (!a.alive) continue;
+      var ax = formationX + a.col * ALIEN_SPACING_X;
+      var ay = formationY + a.row * ALIEN_SPACING_Y;
+      if (verticalHit(playerBullet.x, y1, y2, ax, ay, ALIEN_W, ALIEN_H)) {
+        a.alive = false;
+        alienCount--;
+        score += scoreForRow(a.row);
+        if (score > best) best = score;
+        playerBullet = null;
+        statusNote = alienCount ? 'DIRECT HIT' : 'WAVE CLEARED';
+        if (alienCount === 0) nextWave();
+        publish(true);
+        return true;
+      }
+    }
+
+    if (hitShield(playerBullet.x, y1, y2)) {
+      playerBullet = null;
+      return true;
+    }
+    return true;
+  }
+
+  function loseLife() {
+    if (invincibleFrames > 0 || mode !== 'playing') return false;
+    lives--;
+    if (lives <= 0) {
+      gameOver('GAME OVER');
+      publish(true);
+      return true;
+    }
+    playerX = 320;
+    pointer.x = playerX;
+    pointer.baseYaw = null;
+    invincibleFrames = 100;
+    alienBullets = [];
+    statusNote = 'SHIP LOST';
+    publish(true);
+    return true;
+  }
+
+  function updateAlienBullets() {
+    if (!alienBullets.length) return false;
+    var changed = false;
+    for (var i = alienBullets.length - 1; i >= 0; i--) {
+      var b = alienBullets[i];
+      b.y += 4.2 + Math.min(2.4, wave * 0.18);
+      changed = true;
+      var y1 = b.y;
+      var y2 = b.y + 10;
+      if (hitShield(b.x, y1, y2)) {
+        alienBullets.splice(i, 1);
+        continue;
+      }
+      if (verticalHit(b.x, y1, y2, playerX - SHIP_HALF_W, SHIP_Y - 14, SHIP_HALF_W * 2, 25)) {
+        alienBullets.splice(i, 1);
+        loseLife();
+        break;
+      }
+      if (y1 > FLOOR_Y) alienBullets.splice(i, 1);
+    }
+    return changed;
+  }
+
+  function updateUfo() {
+    if (!ufo) {
+      ufoClock--;
+      if (ufoClock <= 0 && mode === 'playing') {
+        var fromLeft = Math.random() < 0.5;
+        ufo = { x:fromLeft ? -44 : W + 4, vx:fromLeft ? 2.4 : -2.4 };
+        ufoClock = 780 + Math.floor(Math.random() * 720);
+        return true;
+      }
+      return false;
+    }
+    ufo.x += ufo.vx;
+    if (ufo.x < -52 || ufo.x > W + 12) ufo = null;
+    return true;
+  }
+
+  function updateHeadSteering() {
+    if (mode !== 'playing' || !headEnabled || manualFrames > 0) return false;
+    var imu;
+    try { imu = miraCanvas.getIMU(); } catch (e) { return false; }
+    var att = imu && imu.attitude;
+    var ageMs = Number(imu && imu.ageMs);
+    if (!imu || !imu.available || !att || !Number.isFinite(ageMs) || ageMs < 0 || ageMs > 1600) return false;
+    var yaw = Number.isFinite(Number(att.z_yaw)) ? Number(att.z_yaw) : Number(att.z);
+    if (!Number.isFinite(yaw)) return false;
+    if (pointer.baseYaw == null) {
+      pointer.baseYaw = yaw;
+      pointer.x = playerX;
+      return false;
+    }
+    var span = clamp(yawRange, 18, 60);
+    var target = 320 + (invertX ? -1 : 1) * wrap(yaw - pointer.baseYaw) * (W - 52) / span;
+    target = clamp(target, 26, W - 26);
+    pointer.x += (target - pointer.x) * 0.35;
+    var next = Math.round(pointer.x);
+    if (Math.abs(next - playerX) < 1) return false;
+    playerX = next;
+    return true;
+  }
+
+  function alienParts(children, key, x, y, row) {
+    var alt = alienAnim ? 2 : 0;
+    if (row === 0) {
+      children[key + ':top'] = { kind:'rect', x:x + 9, y:y + 2, w:10, h:4, fill:INK };
+      children[key + ':body'] = { kind:'rect', x:x + 5, y:y + 6, w:18, h:9, fill:INK };
+      children[key + ':wing'] = { kind:'rect', x:x + 1, y:y + 9, w:26, h:5, fill:BRIGHT };
+      children[key + ':feet'] = { kind:'rect', x:x + 6 + alt, y:y + 15, w:16 - alt * 2, h:3, fill:INK };
+    } else if (row <= 2) {
+      children[key + ':body'] = { kind:'rect', x:x + 6, y:y + 5, w:16, h:10, fill:INK };
+      children[key + ':arms'] = { kind:'rect', x:x + (alienAnim ? 1 : 3), y:y + 8, w:24 + (alienAnim ? 2 : -2), h:4, fill:BRIGHT };
+      children[key + ':legL'] = { kind:'rect', x:x + (alienAnim ? 5 : 8), y:y + 15, w:5, h:4, fill:INK };
+      children[key + ':legR'] = { kind:'rect', x:x + (alienAnim ? 18 : 15), y:y + 15, w:5, h:4, fill:INK };
+    } else {
+      children[key + ':head'] = { kind:'rect', x:x + 8, y:y + 3, w:12, h:5, fill:INK };
+      children[key + ':body'] = { kind:'rect', x:x + 4, y:y + 8, w:20, h:7, fill:INK };
+      children[key + ':legL'] = { kind:'rect', x:x + (alienAnim ? 3 : 7), y:y + 15, w:6, h:4, fill:BRIGHT };
+      children[key + ':legR'] = { kind:'rect', x:x + (alienAnim ? 19 : 15), y:y + 15, w:6, h:4, fill:BRIGHT };
+    }
+  }
+
+  function buildHud() {
+    return {
+      kind:'rect', x:0, y:0, w:0, h:0, stroke:0, strokeWidth:0,
+      children:{
+        'mi:hud:score':{ kind:'text', x:18, y:10, w:150, h:28, padding:0, text:'SCORE ' + displayScore(score), fill:INK, fontSize:18, lineSpacing:28 },
+        'mi:hud:best':{ kind:'text', x:174, y:10, w:166, h:28, padding:0, text:'BEST ' + displayScore(best), align:'center', fill:MID, fontSize:18, lineSpacing:28 },
+        'mi:hud:wave':{ kind:'text', x:350, y:10, w:126, h:28, padding:0, text:'WAVE ' + Math.min(999, wave), align:'center', fill:INK, fontSize:18, lineSpacing:28 },
+        'mi:hud:lives':{ kind:'text', x:486, y:10, w:136, h:28, padding:0, text:'LIVES ' + Math.max(0, lives), align:'right', fill:INK, fontSize:18, lineSpacing:28 },
+        'mi:hud:rule':{ kind:'line', x1:18, y1:48, x2:622, y2:48, stroke:DIM, strokeWidth:1 }
+      }
+    };
+  }
+
+  function buildAliens() {
+    var children = {};
+    for (var i = 0; i < aliens.length; i++) {
+      var a = aliens[i];
+      if (!a.alive) continue;
+      var x = Math.round(formationX + a.col * ALIEN_SPACING_X);
+      var y = Math.round(formationY + a.row * ALIEN_SPACING_Y);
+      alienParts(children, 'mi:a:' + i, x, y, a.row);
+    }
+    return { kind:'rect', x:0, y:0, w:0, h:0, stroke:0, strokeWidth:0, children:children };
+  }
+
+  function buildShields() {
+    var children = {};
+    for (var i = 0; i < shields.length; i++) {
+      var s = shields[i];
+      if (s.hp <= 0) continue;
+      children['mi:s:' + i] = { kind:'rect', x:s.x, y:s.y, w:s.w, h:s.h, fill:s.hp === 2 ? BRIGHT : DIM };
+    }
+    return { kind:'rect', x:0, y:0, w:0, h:0, stroke:0, strokeWidth:0, children:children };
+  }
+
+  function buildPlayer() {
+    var children = {};
+    var visible = invincibleFrames <= 0 || frameCount % 10 < 5;
+    if (visible) {
+      var x = Math.round(playerX);
+      children['mi:p:base'] = { kind:'rect', x:x - 16, y:SHIP_Y, w:32, h:10, fill:INK };
+      children['mi:p:mid'] = { kind:'rect', x:x - 10, y:SHIP_Y - 7, w:20, h:8, fill:INK };
+      children['mi:p:gun'] = { kind:'rect', x:x - 2, y:SHIP_Y - 14, w:4, h:8, fill:BRIGHT };
+      children['mi:p:foot'] = { kind:'rect', x:x - 19, y:SHIP_Y + 7, w:38, h:4, fill:BRIGHT };
+    }
+    children['mi:p:floor'] = { kind:'line', x1:18, y1:FLOOR_Y, x2:622, y2:FLOOR_Y, stroke:DIM, strokeWidth:2 };
+    return { kind:'rect', x:0, y:0, w:0, h:0, stroke:0, strokeWidth:0, children:children };
+  }
+
+  function buildProjectiles() {
+    var children = {};
+    if (playerBullet) {
+      children['mi:b:p'] = { kind:'line', x1:Math.round(playerBullet.x), y1:Math.round(playerBullet.y), x2:Math.round(playerBullet.x), y2:Math.round(playerBullet.y + 9), stroke:INK, strokeWidth:2 };
+    }
+    for (var i = 0; i < alienBullets.length; i++) {
+      var b = alienBullets[i];
+      var sway = (frameCount + i) % 8 < 4 ? -2 : 2;
+      children['mi:b:a:' + i] = { kind:'line', x1:Math.round(b.x + sway), y1:Math.round(b.y), x2:Math.round(b.x - sway), y2:Math.round(b.y + 10), stroke:MID, strokeWidth:2 };
+    }
+    return { kind:'rect', x:0, y:0, w:0, h:0, stroke:0, strokeWidth:0, children:children };
+  }
+
+  function buildUfo() {
+    var children = {};
+    if (ufo) {
+      var x = Math.round(ufo.x);
+      children['mi:u:top'] = { kind:'rect', x:x + 10, y:70, w:20, h:5, fill:MID };
+      children['mi:u:body'] = { kind:'rect', x:x + 4, y:75, w:32, h:8, fill:INK };
+      children['mi:u:rim'] = { kind:'rect', x:x, y:81, w:40, h:4, fill:BRIGHT };
+    }
+    return { kind:'rect', x:0, y:0, w:0, h:0, stroke:0, strokeWidth:0, children:children };
+  }
+
+  function buildOverlay() {
+    var title, line1, line2, line3;
+    if (mode === 'gameover') {
+      title = 'GAME OVER';
+      line1 = statusNote;
+      line2 = 'SCORE ' + displayScore(score) + '   BEST ' + displayScore(best);
+      line3 = 'TAP OR NEW GAME TO RESTART';
+    } else {
+      title = 'ALIEN DEFENSE';
+      line1 = 'DESTROY THE FORMATION';
+      line2 = 'SCROLL MOVE   TAP FIRE';
+      line3 = headEnabled ? 'LONG PRESS TO RECENTER HEAD' : 'HEAD STEERING IS OFF';
+    }
+    return {
+      kind:'rect', x:0, y:0, w:0, h:0, stroke:0, strokeWidth:0,
+      children:{
+        'mi:o:title':{ kind:'text', x:80, y:174, w:480, h:40, padding:0, text:title, align:'center', fill:INK, fontSize:32, lineSpacing:40 },
+        'mi:o:l1':{ kind:'text', x:80, y:224, w:480, h:28, padding:0, text:line1, align:'center', fill:MID, fontSize:18, lineSpacing:28 },
+        'mi:o:l2':{ kind:'text', x:80, y:258, w:480, h:28, padding:0, text:line2, align:'center', fill:INK, fontSize:18, lineSpacing:28 },
+        'mi:o:l3':{ kind:'text', x:80, y:292, w:480, h:28, padding:0, text:line3, align:'center', fill:MID, fontSize:18, lineSpacing:28 }
+      }
+    };
+  }
+
+  function render() {
+    // Every render emits the complete visible scene, back to front.
+    miraCanvas.draw('mi:hud', buildHud());
+    if (mode === 'playing') {
+      miraCanvas.draw('mi:ufo', buildUfo());
+      miraCanvas.draw('mi:aliens', buildAliens());
+      miraCanvas.draw('mi:shields', buildShields());
+      miraCanvas.draw('mi:shots', buildProjectiles());
+      miraCanvas.draw('mi:player', buildPlayer());
+    } else {
+      // Ready/game-over screens intentionally omit the playfield so text has a clear exclusion zone.
+      miraCanvas.draw('mi:overlay', buildOverlay());
+    }
+  }
+
+  function stateText() {
+    var label = mode === 'ready' ? 'Ready — tap to start' : statusNote;
+    return score + '|' + best + '|' + wave + '|' + lives + '|' + alienCount + '|' + label + '|' + headEnabled + '|' + yawRange + '|' + invertX;
+  }
+
+  function publish(force) {
+    if (typeof miraCompanion === 'undefined' || !miraCompanion || typeof miraCompanion.sendToCompanion !== 'function') return;
+    if (!force && frameCount - publishClock < 18) return;
+    publishClock = frameCount;
+    var sig = stateText();
+    if (!force && sig === lastPublished) return;
+    lastPublished = sig;
+    miraCompanion.sendToCompanion({
+      type:'state',
+      score:score,
+      best:best,
+      wave:wave,
+      lives:lives,
+      aliens:alienCount,
+      status:mode === 'ready' ? 'Ready — tap to start' : statusNote,
+      headEnabled:headEnabled,
+      yawRange:yawRange,
+      invertX:invertX
+    });
+  }
+
+  function handleMessage(message) {
+    if (!message) return;
+    var changed = false;
+
+    if (message.type === 'action') {
+      if (message.action === 'left') changed = manualMove(-1);
+      else if (message.action === 'right') changed = manualMove(1);
+      else if (message.action === 'fire') changed = fire();
+      if (changed) render();
+      if (changed) publish(true);
+      return;
+    }
+
+    if (message.type === 'newGame') {
+      prepareRun();
+      startPlay();
+      render();
+      publish(true);
+      return;
+    }
+
+    if (message.type === 'recenter') {
+      resetPointer();
+      statusNote = mode === 'playing' ? 'HEAD RECENTERED' : statusNote;
+      publish(true);
+      return;
+    }
+
+    if (message.type === 'restoreBest') {
+      var n = Number(message.best);
+      if (Number.isFinite(n)) {
+        var restored = clamp(Math.floor(n), 0, 99999);
+        if (restored > best) {
+          best = restored;
+          render();
+          publish(true);
+        }
+      }
+      return;
+    }
+
+    if (message.type === 'prefs') {
+      var oldHead = headEnabled;
+      if (message.headEnabled != null) headEnabled = !!message.headEnabled;
+      if (Number.isFinite(Number(message.yawRange))) yawRange = clamp(Number(message.yawRange), 18, 60);
+      if (message.invertX != null) invertX = !!message.invertX;
+      if (!oldHead && headEnabled) resetPointer();
+      if (oldHead && !headEnabled) pointer.baseYaw = null;
+      if (mode !== 'playing') render();
+      publish(true);
+    }
+  }
+
+  var offCompanion = null;
+  if (typeof miraCompanion !== 'undefined' && miraCompanion && typeof miraCompanion.onFromCompanion === 'function') {
+    offCompanion = miraCompanion.onFromCompanion(handleMessage);
+  }
+
+  miraCanvas.createPage({ width:W, height:H });
+  prepareRun();
+  render();
+  publish(true);
+
+  miraCanvas.onInput(function (event) {
+    if (!event || typeof event.type !== 'string') return;
+    var changed = false;
+    if (event.type === 'scrollTop') changed = manualMove(-1);
+    else if (event.type === 'scrollBottom') changed = manualMove(1);
+    else if (event.type === 'click') changed = fire();
+    else if (event.type === 'longClick' || event.type === 'holdStart') {
+      resetPointer();
+      if (mode === 'playing') statusNote = 'HEAD RECENTERED';
+      publish(true);
+      return;
+    } else if (event.type === 'clear') {
+      render();
+      return;
+    }
+    if (changed) {
+      render();
+      publish(true);
+    }
+  });
+
+  miraCanvas.animate(function () {
+    frameCount++;
+    var dirty = false;
+
+    if (manualFrames > 0) manualFrames--;
+    if (invincibleFrames > 0) {
+      invincibleFrames--;
+      if (frameCount % 5 === 0) dirty = true;
+    }
+
+    if (updateHeadSteering()) dirty = true;
+
+    if (mode === 'playing') {
+      if (moveAliens()) dirty = true;
+
+      if (mode === 'playing') {
+        if (updatePlayerBullet()) dirty = true;
+        if (updateAlienBullets()) dirty = true;
+      }
+
+      if (mode === 'playing') {
+        if (fireAlienBullet()) dirty = true;
+        if (updateUfo()) dirty = true;
+        if (frameCount % 120 === 0 && statusNote !== 'DEFEND EARTH') {
+          statusNote = 'DEFEND EARTH';
+          publish(true);
+        }
+      }
+    }
+
+    if (dirty) render();
+    publish(false);
+    return true;
+  });
+
+  miraCanvas.onStop(function () {
+    if (typeof offCompanion === 'function') offCompanion();
+    if (typeof miraCompanion !== 'undefined' && miraCompanion && typeof miraCompanion.sendToCompanion === 'function') {
+      miraCompanion.sendToCompanion({ type:'stop' });
+    }
+    miraCanvas.log('Alien Defense stopped');
+  });
+})();
+
+</script>
+</body>
+</html>

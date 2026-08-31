@@ -1,0 +1,605 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <script type="application/mira-manifest+json">
+  { "title": "Lunar Descent", "description": "A gentle retro moon-landing game for Mira glasses.", "phoneIcon": "star" }
+  </script>
+  <style>
+    body { margin:0; padding:20px; font:16px -apple-system,system-ui,sans-serif; background:#f3faf4; color:#173c20; }
+    main { max-width:520px; margin:0 auto; }
+    h1 { margin:0 0 6px; font-size:24px; }
+    p { margin:0 0 14px; color:#66846b; line-height:1.4; }
+    .controls { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-top:14px; }
+    button { min-height:46px; border:0; border-radius:11px; background:#1c7133; color:white; font:inherit; font-weight:650; }
+    button[data-action="thrust"] { touch-action:none; user-select:none; -webkit-user-select:none; }
+    button.secondary { background:#55785c; }
+    #state { margin-top:16px; padding:12px; border:1px solid #c5dfc7; border-radius:12px; background:white; white-space:pre-wrap; }
+  </style>
+</head>
+<body>
+  <main id="mira-companion-root">
+    <h1>Lunar Descent</h1>
+    <p>Built for the Mira glasses. On the ring/touch bar: scroll one way or the other to rotate, tap for a short engine burst, and hold for sustained thrust. On the phone, hold Thrust for a continuous burn.</p>
+    <div class="controls">
+      <button data-action="left">Rotate left</button>
+      <button data-action="thrust">Thrust</button>
+      <button data-action="right">Rotate right</button>
+    </div>
+    <div class="controls" style="grid-template-columns:1fr 1fr">
+      <button class="secondary" data-action="start">Start / next</button>
+      <button class="secondary" data-action="restart">Restart run</button>
+    </div>
+    <div id="state">Waiting for the glasses…</div>
+  </main>
+
+  <script>
+  (function () {
+    function send(action) {
+      if (typeof miraCompanion !== 'undefined' && miraCompanion && typeof miraCompanion.sendToApp === 'function') {
+        miraCompanion.sendToApp({ type:'action', action:action });
+      }
+    }
+
+    var thrustPressStamp = null;
+    var thrustPointerId = null;
+    var buttons = document.querySelectorAll('[data-action]');
+    for (var i = 0; i < buttons.length; i++) {
+      var button = buttons[i];
+      if (button.getAttribute('data-action') === 'thrust') {
+        button.onpointerdown = function (event) {
+          if (!event || thrustPointerId !== null) return;
+          if (typeof event.preventDefault === 'function') event.preventDefault();
+          thrustPointerId = Number(event.pointerId);
+          thrustPressStamp = Number.isFinite(Number(event.timeStamp)) ? Number(event.timeStamp) : null;
+          if (typeof this.setPointerCapture === 'function' && Number.isFinite(thrustPointerId)) {
+            try { this.setPointerCapture(thrustPointerId); } catch (_) {}
+          }
+          send('thrustStart');
+        };
+        button.onpointerup = function (event) {
+          if (!event || Number(event.pointerId) !== thrustPointerId) return;
+          var releaseStamp = Number.isFinite(Number(event.timeStamp)) ? Number(event.timeStamp) : null;
+          var shortPress = thrustPressStamp !== null && releaseStamp !== null && releaseStamp - thrustPressStamp >= 0 && releaseStamp - thrustPressStamp < 250;
+          thrustPointerId = null;
+          thrustPressStamp = null;
+          send('thrustEnd');
+          if (shortPress) send('thrust');
+        };
+        button.onpointercancel = function (event) {
+          if (!event || Number(event.pointerId) !== thrustPointerId) return;
+          thrustPointerId = null;
+          thrustPressStamp = null;
+          send('thrustEnd');
+        };
+        button.onlostpointercapture = function (event) {
+          if (!event || Number(event.pointerId) !== thrustPointerId) return;
+          thrustPointerId = null;
+          thrustPressStamp = null;
+          send('thrustEnd');
+        };
+      } else {
+        button.onclick = function () {
+          send(this.getAttribute('data-action'));
+        };
+      }
+    }
+
+    var stopCompanion = null;
+    if (typeof miraCompanion !== 'undefined' && miraCompanion && typeof miraCompanion.onFromApp === 'function') {
+      stopCompanion = miraCompanion.onFromApp(function (message) {
+        if (!message) return;
+        if (message.type === 'state') {
+          document.getElementById('state').textContent = message.text;
+        }
+        if (message.type === 'stop' && typeof stopCompanion === 'function') stopCompanion();
+      });
+    }
+  })();
+  </script>
+
+  <script type="mira-app">
+  (function () {
+    'use strict';
+
+    var W = 640, H = 480;
+    var INK = 15, MID = 8, SOFT = 5;
+    var HUD_BOTTOM = 66;
+    var LANDER_W = 24, LANDER_H = 28;
+    var HALF_W = LANDER_W / 2;
+    var HALF_H = LANDER_H / 2;
+    var GEAR_X = 11, GEAR_Y = 12;
+    var ROTATE_STEP = 8;
+    var MAX_ANGLE = 72;
+    var PULSE_FRAMES = 6;
+    var FUEL_BURN = 0.24;
+
+    var mode = 'ready';
+    var mission = 1;
+    var score = 0;
+    var best = 0;
+    var x = 320, y = 150, vx = 0, vy = 0, angle = 0, fuel = 100;
+    var thrustHeld = false;
+    var pulseFrames = 0;
+    var thrustNow = false;
+    var frameCount = 0;
+    var statusPushFrame = 0;
+    var lastPublishedText = '';
+    var terrain = [];
+    var stars = [];
+    var padStartX = 256;
+    var padEndX = 384;
+    var padY = 410;
+    var landedPoints = 0;
+    var crashReason = '';
+    var hudFuel = 100;
+    var hudAlt = 0;
+    var hudV = 0;
+    var hudH = 0;
+
+    function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+    function radians(d) { return d * Math.PI / 180; }
+    function signed1(v) {
+      var n = Math.abs(v) < 0.05 ? 0 : v;
+      return (n >= 0 ? '+' : '') + n.toFixed(1);
+    }
+
+    function makeLanderBitmap() {
+      var w = LANDER_W, h = LANDER_H;
+      var p = [];
+      var i;
+      for (i = 0; i < w * h; i++) p.push(15);
+      function set(px, py, value) {
+        if (px >= 0 && px < w && py >= 0 && py < h) p[py * w + px] = value;
+      }
+      function hline(x1, x2, py, value) {
+        var xx; for (xx = x1; xx <= x2; xx++) set(xx, py, value);
+      }
+      function vline(px, y1, y2, value) {
+        var yy; for (yy = y1; yy <= y2; yy++) set(px, yy, value);
+      }
+
+      vline(11, 0, 3, 12); vline(12, 0, 3, 12);
+      hline(9, 14, 4, 14);
+      hline(8, 15, 5, 14);
+      hline(7, 16, 6, 14);
+      hline(6, 17, 7, 14);
+      hline(5, 18, 8, 14);
+      for (var yy = 9; yy <= 18; yy++) hline(4, 19, yy, yy < 12 ? 12 : 14);
+      for (var wy = 11; wy <= 14; wy++) {
+        for (var wx = 9; wx <= 14; wx++) set(wx, wy, 6);
+      }
+      hline(7, 16, 19, 14);
+      set(7,20,14); set(16,20,14);
+      set(6,21,14); set(17,21,14);
+      set(5,22,14); set(18,22,14);
+      set(4,23,14); set(19,23,14);
+      set(3,24,14); set(20,24,14);
+      set(2,25,14); set(21,25,14);
+      hline(0, 5, 26, 12); hline(18, 23, 26, 12);
+      hline(9, 14, 20, 10);
+      return { w:w, h:h, pixels:p };
+    }
+
+    var landerBitmap = makeLanderBitmap();
+
+    function makeRound(m) {
+      var count = 11;
+      terrain = [];
+      var padIndex = 2 + Math.floor(Math.random() * 6); // 2..7, pad spans two segments
+      padStartX = padIndex * 64;
+      padEndX = (padIndex + 2) * 64;
+      padY = 392 + Math.floor(Math.random() * 30);
+
+      for (var i = 0; i < count; i++) {
+        var yy = 372 + Math.floor(Math.random() * 70);
+        terrain.push({ x:i * 64, y:yy });
+      }
+      terrain[padIndex].y = padY;
+      terrain[padIndex + 1].y = padY;
+      terrain[padIndex + 2].y = padY;
+
+      // Keep the approaches from becoming nearly vertical walls.
+      if (padIndex > 0) terrain[padIndex - 1].y = clamp(padY + Math.floor((Math.random() - 0.5) * 46), 360, 448);
+      if (padIndex + 3 < count) terrain[padIndex + 3].y = clamp(padY + Math.floor((Math.random() - 0.5) * 46), 360, 448);
+
+      stars = [];
+      for (var s = 0; s < 18; s++) {
+        stars.push({
+          x:24 + Math.floor(Math.random() * 592),
+          y:252 + Math.floor(Math.random() * 88),
+          r:(s % 6 === 0 ? 2 : 1),
+          fill:(s % 4 === 0 ? 8 : 5)
+        });
+      }
+
+      var center = (padStartX + padEndX) / 2;
+      var offset = (Math.random() - 0.5) * (260 + Math.min(m, 5) * 10);
+      x = clamp(center + offset, 70, 570);
+      y = 118;
+      vx = (Math.random() - 0.5) * (0.65 + Math.min(m, 8) * 0.06);
+      vy = 0.08 + Math.min(m, 8) * 0.02;
+      angle = 0;
+      fuel = Math.max(78, 100 - Math.max(0, m - 1) * 2);
+      thrustHeld = false;
+      pulseFrames = 0;
+      thrustNow = false;
+      landedPoints = 0;
+      crashReason = '';
+      syncHud();
+    }
+
+    function terrainYAt(px) {
+      px = clamp(px, 0, W);
+      var seg = Math.min(terrain.length - 2, Math.floor(px / 64));
+      var a = terrain[seg], b = terrain[seg + 1];
+      var t = (px - a.x) / (b.x - a.x);
+      return a.y + (b.y - a.y) * t;
+    }
+
+    function worldPoint(dx, dy) {
+      var a = radians(angle);
+      var c = Math.cos(a), s = Math.sin(a);
+      return { x:x + dx * c - dy * s, y:y + dx * s + dy * c };
+    }
+
+    function gearPoints() {
+      return [worldPoint(-GEAR_X, GEAR_Y), worldPoint(GEAR_X, GEAR_Y)];
+    }
+
+    function isOverPad() {
+      var gear = gearPoints();
+      var leftFootX = Math.min(gear[0].x, gear[1].x);
+      var rightFootX = Math.max(gear[0].x, gear[1].x);
+      return leftFootX >= padStartX && rightFootX <= padEndX;
+    }
+
+    function safeLanding() {
+      return isOverPad() && Math.abs(vx) <= 0.75 && vy >= -0.20 && vy <= 1.05 && Math.abs(angle) <= 14;
+    }
+
+    function groundContact() {
+      // Sample the visible silhouette rather than only the craft center. This
+      // catches a foot or body edge striking a slope while the center is clear.
+      var local = [
+        [-GEAR_X, GEAR_Y], [GEAR_X, GEAR_Y], [0, GEAR_Y],
+        [-8, 5], [8, 5], [-8, -6], [8, -6]
+      ];
+      var hit = false, maxPenetration = 0;
+      for (var i = 0; i < local.length; i++) {
+        var point = worldPoint(local[i][0], local[i][1]);
+        var penetration = point.y - terrainYAt(point.x);
+        if (penetration >= 0) {
+          hit = true;
+          if (penetration > maxPenetration) maxPenetration = penetration;
+        }
+      }
+      return { hit:hit, penetration:maxPenetration };
+    }
+
+    function altitudeToTerrain() {
+      var gear = gearPoints();
+      var leftClearance = terrainYAt(gear[0].x) - gear[0].y;
+      var rightClearance = terrainYAt(gear[1].x) - gear[1].y;
+      return Math.max(0, Math.min(leftClearance, rightClearance));
+    }
+
+    function syncHud() {
+      hudFuel = Math.max(0, Math.round(fuel));
+      hudAlt = Math.max(0, Math.round(altitudeToTerrain()));
+      hudV = vy;
+      hudH = vx;
+    }
+
+    function startMission(withThrust) {
+      mode = 'playing';
+      thrustHeld = !!withThrust;
+      pulseFrames = withThrust ? PULSE_FRAMES : 0;
+      render();
+      publish(true);
+    }
+
+    function resetRunState() {
+      score = 0;
+      mission = 1;
+      makeRound(mission);
+    }
+
+    function restartRun() {
+      resetRunState();
+      mode = 'ready';
+      render();
+      publish(true);
+    }
+
+    function beginNewRun(withThrust) {
+      resetRunState();
+      startMission(withThrust);
+    }
+
+    function beginOrAdvance(withThrust) {
+      if (mode === 'ready') { startMission(withThrust); return; }
+      if (mode === 'landed') {
+        mission++;
+        makeRound(mission);
+        startMission(withThrust);
+        return;
+      }
+      if (mode === 'crashed') beginNewRun(withThrust);
+    }
+
+    function finishLanding() {
+      // Reward fuel conservation and precision, with a modest bonus for later missions.
+      var verticalBonus = Math.round(clamp((1.05 - Math.max(0, vy)) / 1.05, 0, 1) * 220);
+      var horizontalBonus = Math.round(clamp(1 - Math.abs(vx) / 0.75, 0, 1) * 140);
+      var attitudeBonus = Math.round(clamp(1 - Math.abs(angle) / 14, 0, 1) * 100);
+      var missionBonus = Math.min(1000, Math.max(0, mission - 1) * 50);
+      landedPoints = 400 + Math.round(fuel * 6) + verticalBonus + horizontalBonus + attitudeBonus + missionBonus;
+      score += landedPoints;
+      if (score > best) best = score;
+      // At zero rotation the visible landing feet sit exactly on the pad.
+      y = padY - GEAR_Y;
+      vx = 0; vy = 0; angle = 0;
+      thrustHeld = false; pulseFrames = 0; thrustNow = false;
+      mode = 'landed';
+      syncHud();
+    }
+
+    function finishCrash(reason) {
+      crashReason = reason || 'Too fast';
+      if (score > best) best = score;
+      thrustHeld = false; pulseFrames = 0; thrustNow = false;
+      mode = 'crashed';
+      syncHud();
+    }
+
+    function rotate(delta) {
+      if (mode !== 'playing') return;
+      var nextAngle = clamp(angle + delta, -MAX_ANGLE, MAX_ANGLE);
+      if (nextAngle === angle) return;
+      angle = nextAngle;
+      render();
+    }
+
+    function pulseThrust() {
+      if (mode !== 'playing') { beginOrAdvance(false); return; }
+      pulseFrames = Math.max(pulseFrames, PULSE_FRAMES);
+    }
+
+    function advance() {
+      if (mode !== 'playing') return false;
+
+      var gravity = Math.min(0.028, 0.018 + (mission - 1) * 0.0012);
+      var thrustPower = 0.054;
+      thrustNow = (thrustHeld || pulseFrames > 0) && fuel > 0;
+
+      if (pulseFrames > 0) pulseFrames--;
+
+      if (thrustNow) {
+        var a = radians(angle);
+        var burn = Math.min(FUEL_BURN, fuel);
+        var thrustScale = burn / FUEL_BURN;
+        vx += Math.sin(a) * thrustPower * thrustScale;
+        vy -= Math.cos(a) * thrustPower * thrustScale;
+        fuel = Math.max(0, fuel - burn);
+      }
+
+      vy += gravity;
+      x += vx;
+      y += vy;
+
+      // The display edges act like a soft safety wall so the game stays playable on glasses.
+      if (x < 22) { x = 22; if (vx < 0) vx *= -0.25; }
+      if (x > W - 22) { x = W - 22; if (vx > 0) vx *= -0.25; }
+      if (y < HUD_BOTTOM + 32) { y = HUD_BOTTOM + 32; if (vy < 0) vy *= -0.15; }
+
+      var contact = groundContact();
+      if (contact.hit) {
+        // Pull the craft back to first contact so a crash never freezes with
+        // the sprite visibly buried in the terrain.
+        y -= contact.penetration;
+        if (safeLanding()) finishLanding();
+        else if (!isOverPad()) finishCrash('Missed the pad');
+        else if (Math.abs(angle) > 14) finishCrash('Lander was tilted');
+        else if (Math.abs(vx) > 0.75) finishCrash('Too much sideways speed');
+        else if (vy < -0.20) finishCrash('Still moving upward');
+        else finishCrash('Descent was too fast');
+        return true;
+      }
+
+      if (frameCount % 5 === 0) syncHud();
+      return true;
+    }
+
+    function buildSkyTree() {
+      var children = {};
+      for (var s = 0; s < stars.length; s++) {
+        children['ld:star:' + s] = { kind:'circle', cx:stars[s].x, cy:stars[s].y, r:stars[s].r, fill:stars[s].fill };
+      }
+      return { kind:'rect', x:0, y:0, w:0, h:0, stroke:0, strokeWidth:0, children:children };
+    }
+
+    function buildTerrainTree() {
+      var children = {};
+      for (var i = 0; i < terrain.length - 1; i++) {
+        children['ld:terrain:seg:' + i] = {
+          kind:'line', x1:terrain[i].x, y1:Math.round(terrain[i].y),
+          x2:terrain[i + 1].x, y2:Math.round(terrain[i + 1].y),
+          stroke:MID, strokeWidth:2
+        };
+      }
+      children['ld:pad:line'] = { kind:'line', x1:padStartX, y1:padY, x2:padEndX, y2:padY, stroke:INK, strokeWidth:4 };
+      children['ld:pad:left'] = { kind:'triangle', x1:padStartX, y1:padY - 3, x2:padStartX + 7, y2:padY - 14, x3:padStartX + 14, y3:padY - 3, fill:INK };
+      children['ld:pad:right'] = { kind:'triangle', x1:padEndX - 14, y1:padY - 3, x2:padEndX - 7, y2:padY - 14, x3:padEndX, y3:padY - 3, fill:INK };
+      return { kind:'rect', x:0, y:0, w:0, h:0, stroke:0, strokeWidth:0, children:children };
+    }
+
+    function buildLanderTree() {
+      var a = radians(angle);
+      var exhaustX = -Math.sin(a);
+      var exhaustY = Math.cos(a);
+      var sideX = Math.cos(a);
+      var sideY = Math.sin(a);
+      var flameBaseX = x + exhaustX * 15;
+      var flameBaseY = y + exhaustY * 15;
+      var flameTipX = x + exhaustX * 31;
+      var flameTipY = y + exhaustY * 31;
+      var flameHalf = 5;
+      var fill = thrustNow ? 12 : 0;
+
+      return {
+        kind:'rect', x:0, y:0, w:0, h:0, stroke:0, strokeWidth:0,
+        children:{
+          'ld:flame':{
+            kind:'triangle',
+            x1:Math.round(flameBaseX + sideX * flameHalf), y1:Math.round(flameBaseY + sideY * flameHalf),
+            x2:Math.round(flameBaseX - sideX * flameHalf), y2:Math.round(flameBaseY - sideY * flameHalf),
+            x3:Math.round(flameTipX), y3:Math.round(flameTipY),
+            fill:fill, stroke:0, strokeWidth:0
+          },
+          'ld:craft':{
+            kind:'sprite', x:Math.round(x - HALF_W), y:Math.round(y - HALF_H),
+            w:LANDER_W, h:LANDER_H, bitmap:landerBitmap,
+            rotation:angle, rotationOrigin:{ x:HALF_W, y:HALF_H }
+          }
+        }
+      };
+    }
+
+    function buildHudTree() {
+      var flightText = 'M' + mission + '  ALT ' + hudAlt;
+      var fuelText = 'FUEL ' + hudFuel;
+      var motionText = 'V ' + signed1(hudV) + '  H ' + signed1(hudH);
+      return {
+        kind:'rect', x:0, y:0, w:0, h:0, stroke:0, strokeWidth:0,
+        children:{
+          'ld:hud:flight':{ kind:'text', x:20, y:16, w:190, h:26, padding:0, text:flightText, fill:INK, fontSize:18, lineSpacing:26 },
+          'ld:hud:fuel':{ kind:'text', x:230, y:16, w:150, h:26, padding:0, text:fuelText, align:'center', fill:INK, fontSize:18, lineSpacing:26 },
+          'ld:hud:motion':{ kind:'text', x:400, y:16, w:220, h:26, padding:0, text:motionText, align:'right', fill:INK, fontSize:18, lineSpacing:26 },
+          'ld:hud:rule':{ kind:'line', x1:20, y1:54, x2:620, y2:54, stroke:SOFT, strokeWidth:1 }
+        }
+      };
+    }
+
+    function buildOverlayTree() {
+      var title = '';
+      var line1 = '';
+      var line2 = '';
+      var line3 = '';
+
+      if (mode === 'ready') {
+        title = 'LUNAR DESCENT';
+        line1 = 'Scroll: rotate   Tap: thrust';
+        line2 = 'Hold: sustained thrust';
+        line3 = 'Tap to begin';
+      } else if (mode === 'landed') {
+        title = 'TOUCHDOWN';
+        line1 = '+' + landedPoints + ' points   Score ' + score;
+        line2 = 'Fuel remaining ' + Math.round(fuel);
+        line3 = 'Tap for mission ' + (mission + 1);
+      } else if (mode === 'crashed') {
+        title = 'LANDER LOST';
+        line1 = crashReason;
+        line2 = 'Score ' + score + '   Best ' + best;
+        line3 = 'Tap to start a new run';
+      }
+
+      return {
+        kind:'rect', x:0, y:0, w:0, h:0, stroke:0, strokeWidth:0,
+        children:{
+          'ld:overlay:title':{ kind:'text', x:80, y:94, w:480, h:40, padding:0, text:title, align:'center', fill:INK, fontSize:32, lineSpacing:40 },
+          'ld:overlay:line1':{ kind:'text', x:70, y:146, w:500, h:26, padding:0, text:line1, align:'center', fill:MID, fontSize:18, lineSpacing:26 },
+          'ld:overlay:line2':{ kind:'text', x:70, y:180, w:500, h:26, padding:0, text:line2, align:'center', fill:MID, fontSize:18, lineSpacing:26 },
+          'ld:overlay:line3':{ kind:'text', x:70, y:214, w:500, h:26, padding:0, text:line3, align:'center', fill:INK, fontSize:18, lineSpacing:26 }
+        }
+      };
+    }
+
+    function render() {
+      // Every render emits the complete visible scene, back to front.
+      miraCanvas.draw('ld:sky', buildSkyTree());
+      miraCanvas.draw('ld:terrain', buildTerrainTree());
+      if (mode !== 'ready') miraCanvas.draw('ld:lander', buildLanderTree());
+      miraCanvas.draw('ld:hud', buildHudTree());
+      if (mode !== 'playing') miraCanvas.draw('ld:overlay', buildOverlayTree());
+    }
+
+    function publish(force) {
+      if (typeof miraCompanion === 'undefined' || !miraCompanion || typeof miraCompanion.sendToCompanion !== 'function') return;
+      if (!force && frameCount - statusPushFrame < 15) return;
+      statusPushFrame = frameCount;
+      var text;
+      if (mode === 'playing') {
+        text = 'Mission ' + mission + ' · Altitude ' + Math.round(altitudeToTerrain()) + ' · Fuel ' + Math.round(fuel) + '\n' +
+          'Vertical ' + signed1(vy) + ' · Horizontal ' + signed1(vx) + ' · Angle ' + Math.round(angle) + '°';
+      } else if (mode === 'landed') {
+        text = 'Touchdown · +' + landedPoints + ' points\nScore ' + score + ' · Best ' + best;
+      } else if (mode === 'crashed') {
+        text = 'Lander lost · ' + crashReason + '\nScore ' + score + ' · Best ' + best;
+      } else {
+        text = 'Ready for mission ' + mission + '\nTap Start on the phone or tap on the glasses.';
+      }
+      if (!force && text === lastPublishedText) return;
+      lastPublishedText = text;
+      miraCompanion.sendToCompanion({ type:'state', text:text });
+    }
+
+    function handleAction(action) {
+      if (action === 'left') { rotate(-ROTATE_STEP); return; }
+      if (action === 'right') { rotate(ROTATE_STEP); return; }
+      if (action === 'thrust') { pulseThrust(); return; }
+      if (action === 'thrustStart') {
+        if (mode === 'playing') thrustHeld = true;
+        else beginOrAdvance(true);
+        return;
+      }
+      if (action === 'thrustEnd') { thrustHeld = false; return; }
+      if (action === 'restart') { restartRun(); return; }
+      if (action === 'start') beginOrAdvance(false);
+    }
+
+    var offCompanion = null;
+    if (typeof miraCompanion !== 'undefined' && miraCompanion && typeof miraCompanion.onFromCompanion === 'function') {
+      offCompanion = miraCompanion.onFromCompanion(function (message) {
+        if (message && message.type === 'action') handleAction(message.action);
+      });
+    }
+
+    miraCanvas.createPage({ width:W, height:H });
+    makeRound(mission);
+    render();
+    publish(true);
+
+    miraCanvas.onInput(function (event) {
+      if (!event) return;
+      if (event.type === 'scrollTop') rotate(-ROTATE_STEP);
+      if (event.type === 'scrollBottom') rotate(ROTATE_STEP);
+      if (event.type === 'click') pulseThrust();
+      if (event.type === 'holdStart') {
+        if (mode === 'playing') thrustHeld = true;
+        else beginOrAdvance(true);
+      }
+      if (event.type === 'holdEnd') thrustHeld = false;
+      if (event.type === 'clear') render();
+    });
+
+    miraCanvas.animate(function () {
+      frameCount++;
+      var changed = advance();
+      if (changed) render();
+      publish(false);
+      return true;
+    });
+
+    miraCanvas.onStop(function () {
+      if (typeof offCompanion === 'function') offCompanion();
+      if (typeof miraCompanion !== 'undefined' && miraCompanion && typeof miraCompanion.sendToCompanion === 'function') {
+        miraCompanion.sendToCompanion({ type:'stop' });
+      }
+      miraCanvas.log('Lunar Descent stopped');
+    });
+  })();
+  </script>
+</body>
+</html>

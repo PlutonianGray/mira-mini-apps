@@ -64,6 +64,28 @@ Features include:
 - Glasses\-friendly interface
 - Self\-contained HTML package
 
+### Lunar Descent
+
+A retro lunar\-landing game designed for the Mira glasses display and controls\.
+
+Pilot the lander toward the landing pad while managing descent speed, horizontal motion, attitude, and limited fuel\. Land safely to score points and advance to the next mission\.
+
+Features include:
+
+- Glasses\-friendly 640×480 interface
+- Simulated lunar gravity and lander physics
+- Procedurally varied lunar terrain and landing pad placement
+- Mission progression with increasing difficulty
+- Fuel management
+- Vertical speed, horizontal speed, altitude, and attitude HUD
+- Safe\-landing and crash detection
+- Score and best\-score tracking
+- Mira ring/touch\-bar rotation controls
+- Tap for a short engine burst
+- Hold for sustained thrust
+- Phone companion controls for rotation, thrust, starting, and restarting
+- Self\-contained HTML package
+
 ## Installation
 
 Each Mira app is provided as a single `.html` file\.

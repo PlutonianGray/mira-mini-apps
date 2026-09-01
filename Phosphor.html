@@ -1,0 +1,1103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script type="application/mira-manifest+json">
+  { "title": "Phosphor", "description": "A reading library for Mira glasses. Text and line drawings on the lens; photographs become a mark.", "phoneIcon": "star" }
+  </script>
+  <title>Phosphor</title>
+  <style>
+    :root { --bg:#0b0d0b; --fg:#e7eee7; --muted:#8a948a; --line:rgba(231,238,231,.12); --accent:#6eba7e; }
+    html, body { margin:0; background:var(--bg); color:var(--fg); font: 16px/1.5 ui-sans-serif, system-ui, sans-serif; }
+    #mira-companion-root { max-width: 28rem; margin: 0 auto; padding: 1.25rem 1.25rem 2rem; }
+    h1 { font-size: 1.75rem; font-weight: 500; margin: .25rem 0 .5rem; }
+    .kicker { font-size: .75rem; letter-spacing: .16em; text-transform: uppercase; color: var(--accent); }
+    .muted { color: var(--muted); font-size: .875rem; }
+    button { font: inherit; cursor: pointer; }
+    .list { display:flex; flex-direction:column; gap:.5rem; margin:1rem 0; }
+    .card { display:block; width:100%; text-align:left; background:transparent; color:var(--fg); border:1px solid var(--line); border-radius:12px; padding:.75rem 1rem; }
+    .card.on { border-color: var(--accent); }
+    .card-wrap { display:flex; gap:.5rem; align-items:stretch; }
+    .card-wrap .card { flex:1; }
+    .remove { height:auto; min-height:44px; border-radius:12px; border:1px solid var(--line); background:transparent; color:var(--muted); padding:0 12px; }
+    .row { display:flex; flex-wrap:wrap; gap:.5rem; margin-top: .75rem; }
+    .row button, .add { height:44px; border-radius:8px; border:1px solid var(--line); background:transparent; color:var(--fg); padding:0 14px; }
+    .row button.primary { background:var(--fg); color:var(--bg); border-color:transparent; }
+    input[type=search], input[type=file] { width:100%; height:44px; border-radius:8px; border:1px solid var(--line); background:transparent; color:var(--fg); padding:0 12px; }
+    .hits { margin:.75rem 0; }
+    .hit { display:block; width:100%; text-align:left; border:0; background:transparent; color:var(--fg); padding:.5rem 0; border-bottom:1px solid var(--line); }
+  </style>
+</head>
+<body>
+  <main id="mira-companion-root"></main>
+  <script>
+  (function () {
+    var SAMPLES = [
+      { id:'guide', title:'How Phosphor Works', pages:[
+        'Phosphor is a reading library for Mira glasses.\nLoad documents on your phone. Tap one to send it to the lens. The glasses show text and simple drawings as a sparse green HUD.',
+        'Scroll the ring to move line by line. Tap to turn the page. Hold to return to the library. Photographs cannot be painted; the lens leaves a frame that says a picture would show here.'
+      ]},
+      { id:'ridge', title:'The Ridge Path', pages:[
+        'The Ridge Path\nI left the car where the pavement gives up, on a shoulder of packed clay that still held the night’s rain. The ridge does not announce itself.',
+        'The first mile is a negotiation. Roots cross the trail like the knuckles of a buried hand. Light through the canopy arrived in coins.'
+      ]},
+      { id:'shop', title:'Shop Notes', pages:[
+        'Lamp circuit\nA battery, a switch, and a lamp. Close the switch and the filament has a path home.',
+        'Shelf bracket\nTwo holes in the wall plate. Three in the shelf arm. Steel, three millimetres.',
+        'The finished lamp\nA photograph of the lamp on the bench would live here. Mira cannot paint that scene, so Phosphor leaves a frame.',
+        'Bench plan\nSink at the left. Stove at the right. Walk this clockwise once before you buy another tool.'
+      ], figures:{
+        0:{ kind:'line', drawing:'circuit', caption:'Fig. 1 · lamp circuit' },
+        1:{ kind:'line', drawing:'bracket', caption:'Fig. 2 · shelf bracket' },
+        2:{ kind:'photo', caption:'The finished lamp on the bench' },
+        3:{ kind:'line', drawing:'bench', caption:'Fig. 4 · bench plan' }
+      } }
+    ];
+
+    var STORE = 'phosphor.library';
+    var SAMPLE_IDS = {};
+    SAMPLES.forEach(function (s) { SAMPLE_IDS[s.id] = true; });
+    var MAX_CHARS = 56;
+    var LINES_PER = 9;
+    var MAX_PAGES = 40;
+    var MAX_UPLOADS = 8;
+    var MAX_STORE = 400000;
+    var MAX_PDF_BYTES = 20 * 1024 * 1024;
+    var root = document.getElementById('mira-companion-root');
+    var active = 0;
+    var query = '';
+    var lensPage = 0;
+    var lensTitle = '';
+    var notice = '';
+    var DOCS = SAMPLES.slice();
+    var fromAppUnsub = null;
+    var glassesReady = false;
+    var pendingOpen = 0;
+    var pendingJump = null;
+    var importing = false;
+
+    function esc(s) {
+      return String(s || '')
+        .replace(/&/g, '&' + 'amp;')
+        .replace(/</g, '&' + 'lt;')
+        .replace(/"/g, '&' + 'quot;');
+    }
+
+    function wrap(text, maxChars) {
+      var paragraphs = String(text || '').replace(/\r\n/g, '\n').split('\n');
+      var lines = [];
+      for (var p = 0; p < paragraphs.length; p++) {
+        var raw = paragraphs[p].trim();
+        if (!raw) { if (lines.length) lines.push(''); continue; }
+        var words = raw.split(/\s+/);
+        var cur = '';
+        for (var w = 0; w < words.length; w++) {
+          var word = words[w];
+          if (word.length > maxChars) {
+            if (cur) { lines.push(cur); cur = ''; }
+            for (var k = 0; k < word.length; k += maxChars) {
+              var chunk = word.slice(k, k + maxChars);
+              if (k + maxChars < word.length) lines.push(chunk);
+              else cur = chunk;
+            }
+            continue;
+          }
+          var next = cur ? cur + ' ' + word : word;
+          if (next.length > maxChars && cur) { lines.push(cur); cur = word; }
+          else cur = next;
+        }
+        if (cur) lines.push(cur);
+      }
+      return lines;
+    }
+
+    function paginate(text) {
+      var lines = wrap(text, MAX_CHARS);
+      var pages = [];
+      var omitted = 0;
+      for (var i = 0; i < lines.length; i += LINES_PER) {
+        if (pages.length >= MAX_PAGES) {
+          omitted = lines.length - i;
+          break;
+        }
+        pages.push(lines.slice(i, i + LINES_PER).join('\n'));
+      }
+      if (!pages.length) pages = ['Empty document'];
+      return { pages: pages, omitted: omitted };
+    }
+
+    function loadLibrary() {
+      DOCS = SAMPLES.slice();
+      try {
+        var stored = JSON.parse(localStorage.getItem(STORE) || '[]');
+        if (!Array.isArray(stored)) return;
+        stored.forEach(function (d) {
+          if (d && d.id && d.pages && d.pages.length && !SAMPLE_IDS[d.id]) DOCS.push(d);
+        });
+      } catch (err) {}
+    }
+
+    function persist() {
+      try {
+        var uploads = DOCS.filter(function (d) { return !SAMPLE_IDS[d.id]; });
+        var json = JSON.stringify(uploads);
+        if (json.length > MAX_STORE) {
+          notice = 'Library is too large to save on this phone. Remove a document.';
+          paintNotice();
+          return false;
+        }
+        localStorage.setItem(STORE, json);
+        return true;
+      } catch (err) {
+        notice = 'Could not save the library on this phone.';
+        paintNotice();
+        return false;
+      }
+    }
+
+    function ingestText(title, text) {
+      var packed = paginate(text);
+      notice = packed.omitted
+        ? 'Kept the first ' + MAX_PAGES + ' lens pages. ' + packed.omitted + ' lines were not imported.'
+        : '';
+      paintNotice();
+      DOCS.unshift({ id:'file-' + Date.now(), title: title || 'Untitled', pages: packed.pages });
+      persist();
+      openDoc(0);
+    }
+
+    function u8ToLatin1(u8) {
+      var s = '';
+      var i = 0;
+      while (i < u8.length) {
+        var n = Math.min(u8.length, i + 4096);
+        var chunk = [];
+        for (var j = i; j < n; j++) chunk.push(u8[j]);
+        s += String.fromCharCode.apply(null, chunk);
+        i = n;
+      }
+      return s;
+    }
+
+    function latin1ToU8(s) {
+      var u8 = new Uint8Array(s.length);
+      for (var i = 0; i < s.length; i++) u8[i] = s.charCodeAt(i) & 255;
+      return u8;
+    }
+
+    function inflateBytes(u8, done) {
+      function pipe(fmt) {
+        var ds = new DecompressionStream(fmt);
+        return new Response(new Blob([u8]).stream().pipeThrough(ds)).arrayBuffer()
+          .then(function (buf) { return new Uint8Array(buf); });
+      }
+      if (typeof DecompressionStream === 'undefined') { done(null); return; }
+      pipe('deflate').then(function (out) { done(out); }, function () {
+        pipe('deflate-raw').then(function (out) { done(out); }, function () { done(null); });
+      });
+    }
+
+    function pdfUnescape(s) {
+      return s
+        .replace(/\\(\d{1,3})/g, function (_, n) { return String.fromCharCode(parseInt(n, 8) & 255); })
+        .replace(/\\n/g, '\n')
+        .replace(/\\r/g, '\r')
+        .replace(/\\t/g, '\t')
+        .replace(/\\b/g, '\b')
+        .replace(/\\f/g, '\f')
+        .replace(/\\\(/g, '(')
+        .replace(/\\\)/g, ')')
+        .replace(/\\\\/g, '\\');
+    }
+
+    function parseLiteral(src, i) {
+      var out = '';
+      var depth = 0;
+      i++;
+      while (i < src.length) {
+        var c = src.charAt(i);
+        if (c === '\\') {
+          out += c;
+          if (i + 1 < src.length) out += src.charAt(i + 1);
+          i += 2;
+          continue;
+        }
+        if (c === '(') { depth++; out += c; i++; continue; }
+        if (c === ')') {
+          if (!depth) return { s: pdfUnescape(out), i: i + 1 };
+          depth--;
+          out += c;
+          i++;
+          continue;
+        }
+        out += c;
+        i++;
+      }
+      return { s: pdfUnescape(out), i: i };
+    }
+
+    function hexToChars(hex) {
+      hex = hex.replace(/\s+/g, '');
+      if (hex.length % 2) hex += '0';
+      var out = '';
+      if (hex.length >= 4 && hex.length % 4 === 0) {
+        for (var i = 0; i < hex.length; i += 4) {
+          var n = parseInt(hex.substr(i, 4), 16);
+          if (!n || isNaN(n)) continue;
+          if (n >= 0xD800 && n <= 0xDBFF && i + 4 < hex.length) {
+            var n2 = parseInt(hex.substr(i + 4, 4), 16);
+            out += String.fromCharCode(n, n2);
+            i += 4;
+          } else {
+            out += String.fromCharCode(n);
+          }
+        }
+        return out;
+      }
+      for (var j = 0; j < hex.length; j += 2) {
+        var b = parseInt(hex.substr(j, 2), 16);
+        if (!isNaN(b) && b) out += String.fromCharCode(b);
+      }
+      return out;
+    }
+
+    function decodeHex(h, cmap) {
+      h = h.replace(/\s+/g, '').toUpperCase();
+      if (!h) return '';
+      var wide = h.indexOf('FEFF') === 0;
+      if (wide) h = h.slice(4);
+      var out = '';
+      var i = 0;
+      while (i < h.length) {
+        var four = h.substr(i, 4);
+        var two = h.substr(i, 2);
+        if (cmap && four.length === 4 && cmap[four] !== undefined) { out += cmap[four]; i += 4; continue; }
+        if (cmap && two.length === 2 && cmap[two] !== undefined) { out += cmap[two]; i += 2; continue; }
+        if (wide && four.length === 4) {
+          var n = parseInt(four, 16);
+          if (n >= 32 && n < 0xFFFE) out += String.fromCharCode(n);
+          i += 4;
+        } else if (two.length === 2) {
+          var n2 = parseInt(two, 16);
+          if (n2 >= 32) out += String.fromCharCode(n2);
+          i += 2;
+        } else break;
+      }
+      return out;
+    }
+
+    function parseCMap(src) {
+      var cmap = {};
+      src.replace(/beginbfchar([\s\S]*?)endbfchar/g, function (_, body) {
+        var re = /<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>/g;
+        var m;
+        while ((m = re.exec(body))) cmap[m[1].toUpperCase()] = hexToChars(m[2]);
+        return _;
+      });
+      src.replace(/beginbfrange([\s\S]*?)endbfrange/g, function (_, body) {
+        var reArr = /<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*\[([^\]]*)\]/g;
+        var m;
+        while ((m = reArr.exec(body))) {
+          var start = parseInt(m[1], 16);
+          var hexes = m[3].match(/<([0-9A-Fa-f]+)>/g) || [];
+          for (var k = 0; k < hexes.length; k++) {
+            var key = (start + k).toString(16).toUpperCase();
+            while (key.length < m[1].length) key = '0' + key;
+            cmap[key] = hexToChars(hexes[k].slice(1, -1));
+          }
+        }
+        var reInc = /<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>/g;
+        while ((m = reInc.exec(body))) {
+          if (m[0].indexOf('[') >= 0) continue;
+          var a = parseInt(m[1], 16);
+          var b = parseInt(m[2], 16);
+          var dest = parseInt(m[3], 16);
+          var width = m[1].length;
+          for (var c = a; c <= b; c++) {
+            var ck = c.toString(16).toUpperCase();
+            while (ck.length < width) ck = '0' + ck;
+            var dk = (dest + (c - a)).toString(16).toUpperCase();
+            if (dk.length % 2) dk = '0' + dk;
+            cmap[ck] = hexToChars(dk);
+          }
+        }
+        return _;
+      });
+      return cmap;
+    }
+
+    function extractTextFromContent(src, cmap) {
+      var out = [];
+      var line = '';
+      function flush() {
+        if (line) out.push(line);
+        line = '';
+      }
+      function add(s) {
+        if (!s) return;
+        if (line && !/\s$/.test(line) && !/^\s/.test(s)) line += ' ';
+        line += s;
+      }
+      function walk(block) {
+        var i = 0;
+        while (i < block.length) {
+          var ch = block.charAt(i);
+          if (ch === '(') {
+            var lit = parseLiteral(block, i);
+            add(lit.s);
+            i = lit.i;
+            continue;
+          }
+          if (ch === '<' && block.charAt(i + 1) !== '<') {
+            var close = block.indexOf('>', i + 1);
+            if (close < 0) break;
+            add(decodeHex(block.slice(i + 1, close), cmap));
+            i = close + 1;
+            continue;
+          }
+          if (block.substr(i, 2) === 'T*' || block.substr(i, 2) === 'Td' || block.substr(i, 2) === 'TD' || block.substr(i, 2) === 'Tm') {
+            flush();
+            i += 2;
+            continue;
+          }
+          i++;
+        }
+      }
+      var re = /\bBT\b([\s\S]*?)\bET\b/g;
+      var m;
+      var found = false;
+      while ((m = re.exec(src))) {
+        found = true;
+        walk(m[1]);
+        flush();
+      }
+      if (!found && (/\bTj\b/.test(src) || /\bTJ\b/.test(src))) {
+        walk(src);
+        flush();
+      }
+      return out.join('\n');
+    }
+
+    function findDictStart(src, streamPos) {
+      var i = streamPos - 1;
+      while (i >= 0 && /\s/.test(src.charAt(i))) i--;
+      if (i < 1 || src.charAt(i - 1) !== '>' || src.charAt(i) !== '>') return src.lastIndexOf('<<', streamPos);
+      var depth = 0;
+      for (var j = i - 1; j >= 0; j--) {
+        var pair = src.substr(j, 2);
+        if (pair === '>>') depth++;
+        else if (pair === '<<') { depth--; if (depth === 0) return j; }
+      }
+      return src.lastIndexOf('<<', streamPos);
+    }
+
+    function findStreams(src) {
+      var out = [];
+      var re = /stream(?:\r\n|\r|\n)/g;
+      var m;
+      while ((m = re.exec(src))) {
+        var start = re.lastIndex;
+        var dictStart = findDictStart(src, m.index);
+        var dict = dictStart >= 0 ? src.slice(dictStart, m.index) : '';
+        var end = src.indexOf('endstream', start);
+        if (end < 0) break;
+        var body = src.slice(start, end);
+        if (body.charAt(body.length - 1) === '\n') body = body.slice(0, -1);
+        if (body.charAt(body.length - 1) === '\r') body = body.slice(0, -1);
+        out.push({ dict: dict, body: body });
+        re.lastIndex = end + 9;
+      }
+      return out;
+    }
+
+    function isImageDict(dict) {
+      return /\/Subtype\s*\/Image\b/.test(dict) ||
+        /\/DCTDecode\b/.test(dict) ||
+        /\/JPXDecode\b/.test(dict) ||
+        /\/JBIG2Decode\b/.test(dict) ||
+        /\/CCITTFaxDecode\b/.test(dict);
+    }
+
+    function extractPdf(bytes, done, fail) {
+      try {
+        var src = u8ToLatin1(bytes);
+        if (src.indexOf('%PDF') < 0) { fail('parse'); return; }
+        if (/\/Encrypt\b/.test(src.slice(0, 4096)) || /trailer[\s\S]{0,400}\/Encrypt\b/.test(src)) {
+          fail('encrypted');
+          return;
+        }
+        var streams = findStreams(src);
+        if (!streams.length) {
+          var loose = extractTextFromContent(src, {});
+          if (loose.trim()) done(loose);
+          else fail('empty');
+          return;
+        }
+        var plains = [];
+        var i = 0;
+        function nextInflate() {
+          if (i >= streams.length) {
+            var cmap = {};
+            var s;
+            for (var a = 0; a < plains.length; a++) {
+              s = plains[a];
+              if (!s) continue;
+              if (/beginbfchar|beginbfrange/.test(s)) {
+                var more = parseCMap(s);
+                for (var k in more) if (Object.prototype.hasOwnProperty.call(more, k)) cmap[k] = more[k];
+              }
+            }
+            var texts = [];
+            for (var b = 0; b < plains.length; b++) {
+              s = plains[b];
+              if (!s) continue;
+              if (/\bBT\b/.test(s) || /\bTj\b/.test(s) || /\bTJ\b/.test(s)) {
+                var t = extractTextFromContent(s, cmap);
+                if (t) texts.push(t);
+              }
+            }
+            var text = texts.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+            if (text) done(text);
+            else fail('empty');
+            return;
+          }
+          var st = streams[i++];
+          if (isImageDict(st.dict)) { plains.push(''); nextInflate(); return; }
+          if (/\/FlateDecode\b/.test(st.dict)) {
+            inflateBytes(latin1ToU8(st.body), function (out) {
+              plains.push(out ? u8ToLatin1(out) : '');
+              nextInflate();
+            });
+          } else {
+            plains.push(st.body);
+            nextInflate();
+          }
+        }
+        nextInflate();
+      } catch (err) {
+        fail('parse');
+      }
+    }
+
+    function sendCatalog() {
+      DOCS.forEach(function (d) {
+        send({ type:'catalog', id:d.id, title:d.title, pageCount:d.pages.length });
+      });
+    }
+
+    function send(msg) {
+      if (typeof miraCompanion !== 'undefined' && miraCompanion.sendToApp) miraCompanion.sendToApp(msg);
+    }
+
+    function openDoc(i, keepJump) {
+      if (i < 0 || i >= DOCS.length) return;
+      pendingOpen = i;
+      if (!keepJump) pendingJump = null;
+      active = i;
+      var d = DOCS[i];
+      lensTitle = d.title;
+      lensPage = 0;
+      paintLens();
+      paintResults();
+      if (!glassesReady && typeof miraCompanion !== 'undefined') return;
+      send({ type:'open', id:d.id, title:d.title, pages:d.pages, figures:d.figures || {} });
+    }
+
+    function onGlassesReady() {
+      if (glassesReady) return;
+      glassesReady = true;
+      var restorePage = pendingJump ? pendingJump.page : lensPage;
+      sendCatalog();
+      openDoc(pendingOpen, true);
+      if (pendingJump) {
+        send({ type:'jump', page: pendingJump.page, at: pendingJump.at });
+        pendingJump = null;
+      } else if (restorePage > 0) {
+        send({ type:'jump', page: restorePage });
+        lensPage = restorePage;
+        paintLens();
+      }
+    }
+
+    function removeDoc(i) {
+      var d = DOCS[i];
+      if (!d || SAMPLE_IDS[d.id]) return;
+      var id = d.id;
+      var wasActive = i === active;
+      DOCS.splice(i, 1);
+      if (active >= DOCS.length) active = Math.max(0, DOCS.length - 1);
+      else if (active > i) active -= 1;
+      pendingOpen = active;
+      persist();
+      paintResults();
+      send({ type:'remove', id: id });
+      if (wasActive && DOCS[active]) openDoc(active);
+    }
+
+    function paintLens() {
+      var el = document.getElementById('lens');
+      if (!el) return;
+      var title = lensTitle || (DOCS[active] ? DOCS[active].title : 'none');
+      el.textContent = 'On lens: ' + title + ' · p.' + (lensPage + 1);
+    }
+
+    function paintNotice() {
+      var el = document.getElementById('notice');
+      if (!el) return;
+      el.textContent = notice || '';
+      el.style.display = notice ? 'block' : 'none';
+    }
+
+    function paintResults() {
+      var box = document.getElementById('results');
+      if (!box) return;
+      box.className = query.length >= 2 ? 'hits' : 'list';
+      if (query.length >= 2) {
+        var q = query.toLowerCase();
+        var hits = [];
+        DOCS.forEach(function (d, di) {
+          d.pages.forEach(function (p, pi) {
+            var idx = p.toLowerCase().indexOf(q);
+            if (idx >= 0) hits.push({ di:di, pi:pi, at:idx, title:d.title, snip:p.slice(Math.max(0, idx - 24), idx + 48) });
+          });
+        });
+        box.innerHTML = hits.length
+          ? hits.slice(0, 12).map(function (h) {
+              return '<button class="hit" data-di="' + h.di + '" data-pi="' + h.pi + '" data-at="' + h.at + '"><span class="muted">' + esc(h.title) + ' · p.' + (h.pi + 1) + '</span><div>' + esc(h.snip) + '</div></button>';
+            }).join('')
+          : '<p class="muted">No matches.</p>';
+        box.querySelectorAll('.hit').forEach(function (el) {
+          el.onclick = function () {
+            var di = Number(el.getAttribute('data-di'));
+            var pi = Number(el.getAttribute('data-pi'));
+            var at = Number(el.getAttribute('data-at') || 0);
+            openDoc(di, true);
+            pendingJump = { page:pi, at:at };
+            if (glassesReady) {
+              send({ type:'jump', page:pi, at:at });
+              pendingJump = null;
+            }
+          };
+        });
+        return;
+      }
+      box.innerHTML = DOCS.map(function (d, i) {
+        var rm = SAMPLE_IDS[d.id] ? '' : '<button type="button" class="remove" data-rm="' + i + '">Remove</button>';
+        return '<div class="card-wrap"><button class="card' + (i === active ? ' on' : '') + '" data-i="' + i + '"><strong>' + esc(d.title) + '</strong><div class="muted">' + d.pages.length + ' pages</div></button>' + rm + '</div>';
+      }).join('');
+      box.querySelectorAll('.card').forEach(function (el) {
+        el.onclick = function () { openDoc(Number(el.getAttribute('data-i'))); };
+      });
+      box.querySelectorAll('[data-rm]').forEach(function (el) {
+        el.onclick = function (ev) {
+          if (ev && ev.stopPropagation) ev.stopPropagation();
+          removeDoc(Number(el.getAttribute('data-rm')));
+        };
+      });
+    }
+
+    function paintShell() {
+      root.innerHTML =
+        '<p class="kicker">Mira companion</p><h1>Phosphor</h1>' +
+        '<p class="muted">A text and notes library for the lens. PDFs are opened on this phone; only the extracted text is sent to the glasses.</p>' +
+        '<p class="muted" id="notice" style="display:none"></p>' +
+        '<p class="muted" id="lens">On lens: —</p>' +
+        '<div class="row" style="margin:1rem 0"><input id="q" type="search" placeholder="Search every document" /></div>' +
+        '<div id="results" class="list"></div>' +
+        '<div class="row">' +
+          '<button type="button" data-act="up">Line up</button>' +
+          '<button type="button" data-act="prev">Previous</button>' +
+          '<button type="button" class="primary" data-act="next">Next page</button>' +
+          '<button type="button" data-act="down">Line down</button>' +
+          '<button type="button" data-act="shelf">Library on lens</button>' +
+        '</div>' +
+        '<p class="muted" style="margin-top:1.25rem">Add a PDF, .txt, or .md (packed into at most 40 lens pages). PDFs are read on this phone — no extra download. Multi-column pages may interleave. Photographs in a PDF are skipped; line drawings stay with the sample Shop Notes.</p>' +
+        '<input id="file" type="file" accept=".txt,.md,.pdf,text/plain,application/pdf" />';
+
+      var qEl = document.getElementById('q');
+      qEl.value = query;
+      qEl.oninput = function () {
+        query = qEl.value;
+        paintResults();
+      };
+      root.querySelectorAll('[data-act]').forEach(function (el) {
+        el.onclick = function () { send({ type:'input', action: el.getAttribute('data-act') }); };
+      });
+      document.getElementById('file').onchange = function (ev) {
+        var f = ev.target.files && ev.target.files[0];
+        if (!f) return;
+        ev.target.value = '';
+        if (importing) {
+          notice = 'Still extracting the last file…';
+          paintNotice();
+          return;
+        }
+        var uploads = DOCS.filter(function (d) { return !SAMPLE_IDS[d.id]; }).length;
+        if (uploads >= MAX_UPLOADS) {
+          notice = 'Remove a document before adding another (max ' + MAX_UPLOADS + ' files).';
+          paintNotice();
+          return;
+        }
+        var name = String(f.name || '').toLowerCase();
+        var title = f.name.replace(/\.[^.]+$/, '') || 'Untitled';
+        var isPdf = /\.pdf$/.test(name) || f.type === 'application/pdf';
+        if (isPdf) {
+          if (f.size > MAX_PDF_BYTES) {
+            notice = 'That PDF is larger than 20 MB.';
+            paintNotice();
+            return;
+          }
+          notice = 'Extracting text from PDF…';
+          paintNotice();
+          importing = true;
+          var pdfReader = new FileReader();
+          pdfReader.onload = function () {
+            extractPdf(new Uint8Array(pdfReader.result), function (text) {
+              importing = false;
+              if (!String(text || '').trim()) {
+                notice = 'This PDF has no selectable text (it may be a scan).';
+                paintNotice();
+                return;
+              }
+              ingestText(title, text);
+            }, function (why) {
+              importing = false;
+              notice = why === 'encrypted'
+                ? 'That PDF is locked.'
+                : why === 'empty'
+                  ? 'This PDF has no selectable text (it may be a scan).'
+                  : 'Could not read that PDF.';
+              paintNotice();
+            });
+          };
+          pdfReader.onerror = function () {
+            importing = false;
+            notice = 'Could not read that PDF.';
+            paintNotice();
+          };
+          pdfReader.readAsArrayBuffer(f);
+          return;
+        }
+        notice = '';
+        paintNotice();
+        var reader = new FileReader();
+        reader.onload = function () {
+          ingestText(title, String(reader.result || ''));
+        };
+        reader.readAsText(f);
+      };
+      paintNotice();
+      paintLens();
+      paintResults();
+    }
+
+    loadLibrary();
+    paintShell();
+    if (typeof miraCompanion !== 'undefined' && miraCompanion.onFromApp) {
+      fromAppUnsub = miraCompanion.onFromApp(function (msg) {
+        if (!msg || !msg.type) return;
+        if (msg.type === 'stop') {
+          glassesReady = false;
+          return;
+        }
+        if (msg.type === 'ready') onGlassesReady();
+        if (msg.type === 'pos') {
+          if (typeof msg.page === 'number') lensPage = msg.page;
+          if (msg.title) lensTitle = msg.title;
+          if (msg.id) {
+            for (var di = 0; di < DOCS.length; di++) {
+              if (DOCS[di].id === msg.id) {
+                active = di;
+                pendingOpen = di;
+                break;
+              }
+            }
+            paintResults();
+          }
+          paintLens();
+        }
+        if (msg.type === 'need') {
+          for (var ni = 0; ni < DOCS.length; ni++) {
+            if (DOCS[ni].id === msg.id) { openDoc(ni); break; }
+          }
+        }
+      });
+      send({ type:'hello' });
+    } else {
+      glassesReady = true;
+      openDoc(0);
+    }
+  })();
+  </script>
+  <script type="mira-app">
+  (function () {
+    var HINT_Y = 368;
+    var BODY_H = 234;
+    var WINDOW = 9;
+    var state = {
+      id: '',
+      title: 'PHOSPHOR',
+      pages: ['Choose a document on your phone'],
+      figures: {},
+      page: 0,
+      line: 0,
+      font: 18,
+      mode: 'read',
+      library: [
+        { id:'guide', title:'How Phosphor Works', pages:['Phosphor is a reading library for Mira glasses.', 'Scroll the ring to move line by line.'], figures:{}, loaded:true },
+        { id:'ridge', title:'The Ridge Path', pages:['The Ridge Path\nI left the car where the pavement gives up.', 'The first mile is a negotiation.'], figures:{}, loaded:true },
+        { id:'shop', title:'Shop Notes', pages:[
+          'Lamp circuit\nA battery, a switch, and a lamp.',
+          'Shelf bracket\nTwo holes in the wall plate.',
+          'The finished lamp\nA photograph of the lamp on the bench would live here.',
+          'Bench plan\nSink at the left. Stove at the right.'
+        ], figures:{
+          0:{ kind:'line', drawing:'circuit', caption:'Fig. 1 · lamp circuit' },
+          1:{ kind:'line', drawing:'bracket', caption:'Fig. 2 · shelf bracket' },
+          2:{ kind:'photo', caption:'The finished lamp on the bench' },
+          3:{ kind:'line', drawing:'bench', caption:'Fig. 4 · bench plan' }
+        }, loaded:true }
+      ],
+      shelfIndex: 0
+    };
+
+    function docs() { return state.library; }
+
+    function upsert(d, select) {
+      if (!d || !d.title) return;
+      var found = -1;
+      for (var i = 0; i < state.library.length; i++) {
+        if (d.id && state.library[i].id === d.id) found = i;
+      }
+      var pages = d.pages && d.pages.length ? d.pages : null;
+      var figures = d.figures || null;
+      if (found >= 0) {
+        state.library[found].title = d.title;
+        if (pages) {
+          state.library[found].pages = pages;
+          state.library[found].loaded = true;
+        }
+        if (figures) state.library[found].figures = figures;
+        if (typeof d.pageCount === 'number') state.library[found].pageCount = d.pageCount;
+        if (select) state.shelfIndex = found;
+        return state.library[found];
+      }
+      var entry = {
+        id: d.id,
+        title: d.title,
+        pages: pages || ['Open this from your phone'],
+        figures: figures || {},
+        loaded: !!pages,
+        pageCount: typeof d.pageCount === 'number' ? d.pageCount : (pages ? pages.length : 1)
+      };
+      state.library.push(entry);
+      if (select) state.shelfIndex = state.library.length - 1;
+      return entry;
+    }
+
+    function applyDoc(d) {
+      var entry = upsert(d, true) || d;
+      if (!entry) return;
+      state.id = entry.id || '';
+      state.title = entry.title || 'PHOSPHOR';
+      state.pages = entry.pages && entry.pages.length ? entry.pages : ['Empty document'];
+      state.figures = entry.figures || {};
+      entry.loaded = !!(entry.pages && entry.pages.length && entry.pages[0] !== 'Open this from your phone');
+      state.page = 0;
+      state.line = 0;
+      state.mode = 'read';
+      tellPhone();
+    }
+
+    function tellPhone() {
+      if (typeof miraCompanion !== 'undefined' && miraCompanion.sendToCompanion) {
+        miraCompanion.sendToCompanion({ type:'pos', id:state.id, title:state.title, page:state.page, line:state.line });
+      }
+    }
+
+    function tellReady() {
+      if (typeof miraCompanion !== 'undefined' && miraCompanion.sendToCompanion) {
+        miraCompanion.sendToCompanion({ type:'ready' });
+      }
+    }
+
+    function lineArt(kind, ox, oy) {
+      if (kind === 'bracket') {
+        return {
+          'ph:d:a': { kind:'line', x1:ox+120, y1:oy+28, x2:ox+120, y2:oy+148, stroke:15, strokeWidth:2 },
+          'ph:d:b': { kind:'line', x1:ox+120, y1:oy+148, x2:ox+420, y2:oy+148, stroke:15, strokeWidth:2 },
+          'ph:d:c': { kind:'line', x1:ox+100, y1:oy+28, x2:ox+100, y2:oy+148, stroke:15, strokeWidth:2 },
+          'ph:d:d': { kind:'line', x1:ox+80, y1:oy+20, x2:ox+80, y2:oy+156, stroke:15, strokeWidth:2 },
+          'ph:d:h1': { kind:'circle', cx:ox+120, cy:oy+52, r:8, stroke:15, strokeWidth:2 },
+          'ph:d:h2': { kind:'circle', cx:ox+120, cy:oy+108, r:8, stroke:15, strokeWidth:2 },
+          'ph:d:h3': { kind:'circle', cx:ox+200, cy:oy+148, r:8, stroke:15, strokeWidth:2 },
+          'ph:d:h4': { kind:'circle', cx:ox+300, cy:oy+148, r:8, stroke:15, strokeWidth:2 }
+        };
+      }
+      if (kind === 'bench') {
+        return {
+          'ph:d:a': { kind:'line', x1:ox+40, y1:oy+24, x2:ox+520, y2:oy+24, stroke:15, strokeWidth:2 },
+          'ph:d:b': { kind:'line', x1:ox+520, y1:oy+24, x2:ox+520, y2:oy+152, stroke:15, strokeWidth:2 },
+          'ph:d:c': { kind:'line', x1:ox+520, y1:oy+152, x2:ox+40, y2:oy+152, stroke:15, strokeWidth:2 },
+          'ph:d:d': { kind:'line', x1:ox+40, y1:oy+152, x2:ox+40, y2:oy+24, stroke:15, strokeWidth:2 },
+          'ph:d:e': { kind:'line', x1:ox+160, y1:oy+24, x2:ox+160, y2:oy+152, stroke:15, strokeWidth:2 },
+          'ph:d:f': { kind:'line', x1:ox+400, y1:oy+24, x2:ox+400, y2:oy+152, stroke:15, strokeWidth:2 }
+        };
+      }
+      return {
+        'ph:d:bat1': { kind:'line', x1:ox+78, y1:oy+52, x2:ox+78, y2:oy+136, stroke:15, strokeWidth:2 },
+        'ph:d:bat2': { kind:'line', x1:ox+96, y1:oy+68, x2:ox+96, y2:oy+120, stroke:15, strokeWidth:2 },
+        'ph:d:w1': { kind:'line', x1:ox+96, y1:oy+94, x2:ox+200, y2:oy+94, stroke:15, strokeWidth:2 },
+        'ph:d:sw': { kind:'line', x1:ox+216, y1:oy+94, x2:ox+266, y2:oy+62, stroke:15, strokeWidth:2 },
+        'ph:d:w2': { kind:'line', x1:ox+284, y1:oy+94, x2:ox+358, y2:oy+94, stroke:15, strokeWidth:2 },
+        'ph:d:x1': { kind:'line', x1:ox+382, y1:oy+72, x2:ox+418, y2:oy+114, stroke:15, strokeWidth:2 },
+        'ph:d:x2': { kind:'line', x1:ox+418, y1:oy+72, x2:ox+382, y2:oy+114, stroke:15, strokeWidth:2 },
+        'ph:d:w3': { kind:'line', x1:ox+428, y1:oy+94, x2:ox+500, y2:oy+94, stroke:15, strokeWidth:2 },
+        'ph:d:lamp': { kind:'circle', cx:ox+400, cy:oy+94, r:28, stroke:15, strokeWidth:2 }
+      };
+    }
+
+    function short(s, n) {
+      s = String(s || '');
+      if (s.length <= n) return s;
+      return s.slice(0, n - 1) + '…';
+    }
+
+    function wrap(text, maxChars) {
+      var paragraphs = String(text || '').replace(/\r\n/g, '\n').split('\n');
+      var lines = [];
+      for (var p = 0; p < paragraphs.length; p++) {
+        var raw = paragraphs[p].trim();
+        if (!raw) { if (lines.length) lines.push(''); continue; }
+        var words = raw.split(/\s+/);
+        var cur = '';
+        for (var w = 0; w < words.length; w++) {
+          var word = words[w];
+          if (word.length > maxChars) {
+            if (cur) { lines.push(cur); cur = ''; }
+            for (var k = 0; k < word.length; k += maxChars) {
+              var chunk = word.slice(k, k + maxChars);
+              if (k + maxChars < word.length) lines.push(chunk);
+              else cur = chunk;
+            }
+            continue;
+          }
+          var next = cur ? cur + ' ' + word : word;
+          if (next.length > maxChars && cur) { lines.push(cur); cur = word; }
+          else cur = next;
+        }
+        if (cur) lines.push(cur);
+      }
+      return lines;
+    }
+
+    function lineAt(text, at, maxChars) {
+      var prefix = String(text || '').slice(0, Math.max(0, at));
+      var lines = wrap(prefix, maxChars);
+      return Math.max(0, lines.length - 1);
+    }
+
+    function visibleWindow() {
+      return state.figures[state.page] ? 1 : WINDOW;
+    }
+
+    function pageLines() {
+      var maxChars = state.font === 24 ? 43 : 56;
+      return wrap(state.pages[state.page] || '', maxChars);
+    }
+
+    function maxStart() {
+      return Math.max(0, pageLines().length - visibleWindow());
+    }
+
+    function emptyText(key, y, h) {
+      return { key: key, shape: { kind:'text', x:40, y:y || 0, w:560, h:h || 26, text:'', fontSize:18, fill:0 } };
+    }
+
+    function emptyLine(key) {
+      return { key: key, shape: { kind:'line', x1:0, y1:0, x2:0, y2:0, stroke:0, strokeWidth:0 } };
+    }
+
+    function emptyCircle(key) {
+      return { key: key, shape: { kind:'circle', cx:0, cy:0, r:0, stroke:0, strokeWidth:0 } };
+    }
+
+    function blankFrame() {
+      var trees = [
+        emptyText('ph:title', 28, 40),
+        emptyText('ph:page', 34, 26),
+        { key:'ph:rule', shape:{ kind:'line', x1:40, y1:76, x2:40, y2:76, stroke:0, strokeWidth:0 } },
+        { key:'ph:body', shape:{ kind:'text', x:40, y:92, w:560, h:BODY_H, text:'', fontSize:18, fill:0 } },
+        emptyText('ph:hint', HINT_Y, 26),
+        emptyText('ph:cap', 308, 26),
+        emptyText('ph:photo:t', 198, 40),
+        emptyText('ph:photo:s', 238, 28),
+        { key:'ph:photo', shape:{ kind:'rect', x:0, y:0, w:0, h:0, stroke:0, strokeWidth:0 } },
+        { key:'ph:draw', shape:{ kind:'rect', x:0, y:0, w:0, h:0, stroke:0, strokeWidth:0 } }
+      ];
+      for (var i = 0; i < 6; i++) trees.push(emptyText('ph:shelf:' + i, 100 + i * 40, 32));
+      var lines = ['ph:d:a','ph:d:b','ph:d:c','ph:d:d','ph:d:e','ph:d:f','ph:d:w1','ph:d:w2','ph:d:w3','ph:d:sw','ph:d:x1','ph:d:x2','ph:d:bat1','ph:d:bat2'];
+      var circs = ['ph:d:h1','ph:d:h2','ph:d:h3','ph:d:h4','ph:d:lamp'];
+      for (var L = 0; L < lines.length; L++) trees.push(emptyLine(lines[L]));
+      for (var C = 0; C < circs.length; C++) trees.push(emptyCircle(circs[C]));
+      return trees;
+    }
+
+    function render() {
+      var trees = blankFrame();
+      var scene = {};
+      function put(item) { scene[item.key] = item.shape; }
+      for (var b = 0; b < trees.length; b++) put(trees[b]);
+      if (state.mode === 'shelf') {
+        put({ key: 'ph:title', shape: { kind:'text', x:40, y:28, w:560, h:40, text:'LIBRARY', fontSize:24, fill:15 } });
+        put({ key: 'ph:rule', shape: { kind:'line', x1:40, y1:76, x2:600, y2:76, stroke:8, strokeWidth:1 } });
+        var list = docs();
+        var start = Math.max(0, Math.min(Math.max(0, list.length - 6), state.shelfIndex - 2));
+        for (var i = 0; i < 6; i++) {
+          var doc = list[start + i];
+          if (!doc) break;
+          var sel = start + i === state.shelfIndex;
+          put({
+            key: 'ph:shelf:' + i,
+            shape: { kind:'text', x:40, y:100 + i * 40, w:560, h:32, text:(sel ? '> ' : '  ') + short(doc.title, 28), fontSize:24, fill: sel ? 15 : 8 }
+          });
+        }
+        put({ key: 'ph:hint', shape: { kind:'text', x:40, y:HINT_Y, w:560, h:26, text:'scroll to choose · tap to send · hold to leave', fontSize:18, align:'center', fill:4 } });
+      } else {
+        var pageText = state.pages[state.page] || '';
+        put({ key: 'ph:title', shape: { kind:'text', x:40, y:28, w:420, h:40, text: short(String(state.title).toUpperCase(), 22), fontSize:24, fill:15 } });
+        put({ key: 'ph:page', shape: { kind:'text', x:470, y:34, w:130, h:26, text: (state.page + 1) + ' / ' + Math.max(1, state.pages.length), fontSize:18, align:'right', fill:8 } });
+        put({ key: 'ph:rule', shape: { kind:'line', x1:40, y1:76, x2:600, y2:76, stroke:8, strokeWidth:1 } });
+
+        var fig = state.figures[state.page];
+        var pitch = state.font + 8;
+        var maxChars = state.font === 24 ? 43 : 56;
+        var lines = wrap(pageText, maxChars);
+        var windowLines = visibleWindow();
+        var startLine = Math.max(0, Math.min(maxStart(), state.line));
+        var body = lines.slice(startLine, startLine + windowLines).join('\n');
+        put({
+          key: 'ph:body',
+          shape: { kind:'text', x:40, y:92, w:560, h: BODY_H, text: body, fontSize: state.font, lineSpacing: pitch, fill: 10 }
+        });
+
+        if (fig && fig.kind === 'photo') {
+          put({ key: 'ph:photo', shape: { kind:'rect', x:40, y:148, w:560, h:152, stroke:10, strokeWidth:2 } });
+          put({ key: 'ph:photo:t', shape: { kind:'text', x:40, y:198, w:560, h:40, text:'PICTURE', fontSize:24, align:'center', fill:15 } });
+          put({ key: 'ph:photo:s', shape: { kind:'text', x:40, y:238, w:560, h:28, text:'would show here', fontSize:18, align:'center', fill:8 } });
+          put({ key: 'ph:cap', shape: { kind:'text', x:40, y:308, w:560, h:26, text: short(fig.caption || '', 42), fontSize:18, fill:4 } });
+        } else if (fig && fig.kind === 'line') {
+          var art = lineArt(fig.drawing, 40, 128);
+          for (var ak in art) {
+            if (Object.prototype.hasOwnProperty.call(art, ak)) put({ key: ak, shape: art[ak] });
+          }
+          put({ key: 'ph:cap', shape: { kind:'text', x:40, y:308, w:560, h:26, text: short(fig.caption || '', 42), fontSize:18, fill:4 } });
+        }
+
+        put({ key: 'ph:hint', shape: { kind:'text', x:40, y:HINT_Y, w:560, h:26, text:'scroll to move · tap next page · hold for library', fontSize:18, align:'center', fill:4 } });
+      }
+      var keys = [];
+      for (var sk in scene) if (Object.prototype.hasOwnProperty.call(scene, sk)) keys.push(sk);
+      for (var t = 0; t < keys.length; t++) miraCanvas.draw(keys[t], scene[keys[t]]);
+    }
+
+    function turn(delta) {
+      if (state.mode === 'shelf') {
+        if (delta > 0) {
+          var list = docs();
+          var pick = list[state.shelfIndex] || list[0];
+          if (!pick) { state.mode = 'read'; return; }
+          if (pick.loaded) applyDoc(pick);
+          else if (typeof miraCompanion !== 'undefined' && miraCompanion.sendToCompanion) {
+            miraCompanion.sendToCompanion({ type:'need', id: pick.id });
+          } else applyDoc(pick);
+        }
+        return;
+      }
+      var next = state.page + delta;
+      if (next < 0 || next >= state.pages.length) return;
+      state.page = next;
+      state.line = 0;
+      tellPhone();
+    }
+
+    function scroll(delta) {
+      if (state.mode === 'shelf') {
+        var n = docs().length;
+        if (!n) return;
+        state.shelfIndex = (state.shelfIndex + delta + n) % n;
+        return;
+      }
+      state.line = Math.max(0, Math.min(maxStart(), state.line + delta));
+    }
+
+    miraCanvas.createPage({ width:640, height:480 });
+    miraCanvas.onInput(function (e) {
+      if (!e) return;
+      if (e.type === 'clear') { render(); return; }
+      if (e.type === 'scrollTop' || (e.type === 'scroll' && e.delta < 0)) scroll(-1);
+      else if (e.type === 'scrollBottom' || (e.type === 'scroll' && e.delta > 0)) scroll(1);
+      else if (e.type === 'click') turn(1);
+      else if (e.type === 'longClick') state.mode = state.mode === 'shelf' ? 'read' : 'shelf';
+      render();
+    });
+
+    var unsub = null;
+    if (typeof miraCompanion !== 'undefined' && miraCompanion.onFromCompanion) {
+      unsub = miraCompanion.onFromCompanion(function (msg) {
+        if (!msg || !msg.type) return;
+        if (msg.type === 'hello') {
+          tellReady();
+        } else if (msg.type === 'catalog') {
+          upsert(msg, false);
+        } else if (msg.type === 'remove') {
+          for (var r = 0; r < state.library.length; r++) {
+            if (state.library[r].id === msg.id) {
+              state.library.splice(r, 1);
+              if (r < state.shelfIndex) state.shelfIndex -= 1;
+              if (state.shelfIndex >= state.library.length) state.shelfIndex = Math.max(0, state.library.length - 1);
+              break;
+            }
+          }
+          if (state.id === msg.id) {
+            var next = state.library[state.shelfIndex] || state.library[0];
+            if (next) applyDoc(next);
+          }
+        } else if (msg.type === 'open') {
+          applyDoc(msg);
+        } else if (msg.type === 'jump') {
+          state.page = Math.max(0, Math.min(state.pages.length - 1, msg.page || 0));
+          var maxChars = state.font === 24 ? 43 : 56;
+          var pageText = state.pages[state.page] || '';
+          var atLine = typeof msg.at === 'number' ? lineAt(pageText, msg.at, maxChars) : Math.max(0, msg.line || 0);
+          state.line = Math.max(0, Math.min(maxStart(), atLine));
+          state.mode = 'read';
+          tellPhone();
+        } else if (msg.type === 'input') {
+          var a = msg.action;
+          if (a === 'up') scroll(-1);
+          if (a === 'down') scroll(1);
+          if (a === 'prev') turn(-1);
+          if (a === 'next') turn(1);
+          if (a === 'shelf') state.mode = 'shelf';
+        }
+        render();
+      });
+    }
+
+    if (typeof miraCanvas.onStop === 'function') {
+      miraCanvas.onStop(function () {
+        if (typeof unsub === 'function') unsub();
+        if (typeof miraCompanion !== 'undefined' && miraCompanion.sendToCompanion) {
+          miraCompanion.sendToCompanion({ type:'stop' });
+        }
+      });
+    }
+
+    tellReady();
+    render();
+  })();
+  </script>
+</body>
+</html>

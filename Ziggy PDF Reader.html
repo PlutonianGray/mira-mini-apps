@@ -1,0 +1,1816 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script type="application/mira-manifest+json">
+{ "title": "Mira PDF Reader", "description": "Store, search, and read PDFs on Mira glasses.", "phoneIcon": "file" }
+</script>
+<style>
+  :root { color-scheme: light; --ink:#163a20; --muted:#6d846f; --line:#d8e6d9; --green:#1d6f36; --soft:#f3f8f3; --card:#fff; --danger:#a13030; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--soft); color:var(--ink); font:15px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+  main { max-width:920px; margin:0 auto; padding:18px 16px 40px; }
+  h1 { margin:0; font-size:25px; letter-spacing:-.3px; }
+  h2 { margin:0; font-size:18px; }
+  p { color:var(--muted); line-height:1.45; }
+  .top { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; margin-bottom:16px; }
+  .pill { padding:7px 10px; background:#e3efe5; border-radius:999px; color:#315c3a; font-size:12px; white-space:nowrap; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:16px; padding:14px; margin:12px 0; box-shadow:0 1px 2px rgba(20,60,30,.04); }
+  .toolbar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  button, input, select { font:inherit; min-height:42px; border-radius:11px; }
+  button { border:0; background:var(--green); color:#fff; padding:10px 14px; font-weight:700; }
+  button.secondary { color:var(--ink); background:#edf5ee; }
+  button.danger { background:#fff0f0; color:var(--danger); border:1px solid #f0caca; }
+  button:disabled { opacity:.45; }
+  input, select { border:1px solid #c9dbc9; background:#fff; color:var(--ink); padding:8px 10px; }
+  input[type="search"] { flex:1 1 250px; }
+  #fileInput { display:none; }
+  .doc { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:10px; padding:12px 0; border-top:1px solid #edf2ed; }
+  .doc:first-child { border-top:0; }
+  .docTitle { font-weight:750; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .meta { color:var(--muted); font-size:12px; margin-top:4px; }
+  .docActions { display:flex; gap:6px; align-items:center; flex-wrap:wrap; justify-content:flex-end; }
+  .docActions button { min-height:36px; padding:7px 10px; font-size:13px; }
+  #viewer[hidden], #searchResults[hidden] { display:none; }
+  .viewerHead { display:flex; justify-content:space-between; gap:10px; align-items:flex-start; }
+  #activeTitle { overflow-wrap:anywhere; }
+  #preview { margin-top:12px; padding:14px; min-height:180px; background:#f8fbf8; border:1px solid var(--line); border-radius:12px; white-space:pre-wrap; line-height:1.55; color:#234b2b; }
+  #figurePreview { display:block; max-width:100%; height:auto; margin:10px 0 0; border:1px solid var(--line); border-radius:12px; background:#e8f3e9; image-rendering:pixelated; }
+  #figurePreview[hidden] { display:none; }
+  .navrow { display:grid; grid-template-columns:auto 1fr auto; gap:8px; align-items:center; margin-top:10px; }
+  #progressText { text-align:center; color:var(--muted); font-size:13px; }
+  .searchItem { padding:10px 0; border-top:1px solid #edf2ed; cursor:pointer; }
+  .searchItem:first-child { border-top:0; }
+  .searchItem strong { display:block; margin-bottom:4px; }
+  .snippet { color:#4f6952; font-size:13px; line-height:1.4; }
+  .status { margin-top:8px; color:var(--muted); font-size:13px; }
+  .warn { color:#8a5a16; }
+  .empty { padding:18px 4px; color:var(--muted); text-align:center; }
+  .spinner { display:inline-block; width:13px; height:13px; border:2px solid #c4d7c7; border-top-color:var(--green); border-radius:50%; animation:spin .8s linear infinite; vertical-align:-2px; margin-right:5px; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+  @media (max-width:620px) {
+    .top { display:block; }
+    .pill { display:inline-block; margin-top:10px; }
+    .doc { grid-template-columns:1fr; }
+    .docActions { justify-content:flex-start; }
+  }
+</style>
+</head>
+<body>
+<main id="mira-companion-root">
+  <div class="top">
+    <div>
+      <h1>Mira PDF Reader</h1>
+      <p style="margin:5px 0 0">Keep a small PDF library on the phone, search it, and read the selected document on the glasses.</p>
+    </div>
+    <div class="pill" id="glassStatus">Glasses: waiting</div>
+  </div>
+
+  <section class="card">
+    <div class="toolbar">
+      <button id="addPdf">Add PDFs</button>
+      <input id="fileInput" type="file" accept="application/pdf,.pdf" multiple>
+      <button class="secondary" id="refreshLibrary">Refresh</button>
+    </div>
+    <div class="status" id="importStatus">PDFs stay on this device. Text extraction is local and does not upload the document.</div>
+  </section>
+
+  <section class="card">
+    <div class="viewerHead"><h2>Library</h2><span class="meta" id="libraryCount"></span></div>
+    <div id="library"></div>
+  </section>
+
+  <section class="card" id="viewer" hidden>
+    <div class="viewerHead">
+      <div><h2 id="activeTitle">Document</h2><div class="meta" id="activeMeta"></div><div class="meta" id="cacheStatus"></div></div>
+      <select id="textSize" aria-label="Glasses text size"><option value="normal">Normal text</option><option value="large">Large text</option></select>
+    </div>
+
+    <div class="toolbar" style="margin-top:12px">
+      <input id="searchBox" type="search" placeholder="Search this PDF">
+      <button id="searchBtn">Search</button>
+      <button class="secondary" id="clearSearch">Clear</button>
+    </div>
+    <div id="searchResults" hidden></div>
+
+    <div id="preview"></div>
+    <div class="toolbar" id="figureTools" hidden style="margin-top:10px">
+      <button class="secondary" id="showFigureBtn">Show figure on glasses</button>
+      <div class="status" id="figureMeta" style="margin-top:0"></div>
+    </div>
+    <canvas id="figurePreview" width="320" height="192" hidden aria-label="Extracted figure preview"></canvas>
+    <div class="navrow">
+      <button class="secondary" id="prevBtn">Previous</button>
+      <div id="progressText"></div>
+      <button class="secondary" id="nextBtn">Next</button>
+    </div>
+    <div class="toolbar" style="margin-top:10px">
+      <label class="meta" for="pageJump">PDF page</label>
+      <input id="pageJump" type="number" min="1" value="1" style="width:90px">
+      <button class="secondary" id="jumpBtn">Go</button>
+      <button class="secondary" id="startBtn">Start of document</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Glasses controls</h2>
+    <p style="margin-bottom:0">Swipe/scroll down for the next reading screen and up for the previous one. Reading screens are cached on the glasses for instant local navigation: smaller documents can be cached in full, while larger documents keep a rolling nearby window that the phone replenishes when available. Tap hides or restores the small header/footer. Long-press returns to the “choose a document on phone” screen. For simple PDF images, the phone creates a compact green Mira bitmap that you can preview and send to the glasses. Complex, vector-only, or unsupported visuals still use the visual-note card.</p>
+  </section>
+</main>
+
+<script>
+(function () {
+  'use strict';
+  const bridge = window.miraCompanion || {
+    sendToApp:function(){},
+    onFromApp:function(){ return function(){}; }
+  };
+  const DB_NAME = 'mira-pdf-reader';
+  const DB_VERSION = 1;
+  const STORE = 'documents';
+  let db = null;
+  let docs = [];
+  let active = null;
+  let glassesReady = false;
+  const saveTimers = new Map();
+  const CACHE_FULL_SCREEN_LIMIT = 140;
+  const CACHE_MESSAGE_BYTE_LIMIT = 32768;
+  const CACHE_WINDOW_SIZE = 49;
+  const CACHE_REFILL_MARGIN = 8;
+  const screenModelCache = new Map();
+  let cacheSession = null;
+  let cacheSerial = 0;
+
+  const $ = id => document.getElementById(id);
+  const esc = value => String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const clamp = (v,a,b) => Math.max(a, Math.min(b,v));
+  function bridgeTitle(value) {
+    const s=String(value==null?'':value);
+    return s.length>160?s.slice(0,159)+'…':s;
+  }
+
+  function openDB() {
+    return new Promise((resolve,reject) => {
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      req.onupgradeneeded = () => {
+        const d = req.result;
+        if (!d.objectStoreNames.contains(STORE)) d.createObjectStore(STORE, { keyPath:'id' });
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error || new Error('Could not open document storage'));
+    });
+  }
+  function tx(mode) { return db.transaction(STORE, mode).objectStore(STORE); }
+  function getAll() { return new Promise((resolve,reject) => { const r=tx('readonly').getAll(); r.onsuccess=()=>resolve(r.result||[]); r.onerror=()=>reject(r.error); }); }
+  function putDoc(doc) { return new Promise((resolve,reject) => { const r=tx('readwrite').put(doc); r.onsuccess=()=>resolve(); r.onerror=()=>reject(r.error); }); }
+  function deleteDoc(id) { return new Promise((resolve,reject) => { const r=tx('readwrite').delete(id); r.onsuccess=()=>resolve(); r.onerror=()=>reject(r.error); }); }
+
+  function humanBytes(n) {
+    if (n < 1024) return n + ' B';
+    if (n < 1024*1024) return (n/1024).toFixed(1) + ' KB';
+    return (n/(1024*1024)).toFixed(1) + ' MB';
+  }
+
+  function migrateDoc(doc) {
+    if (!doc || !Array.isArray(doc.pages)) return doc;
+    if (!Array.isArray(doc.figurePages)) doc.figurePages = [];
+    while (doc.figurePages.length < doc.pages.length) doc.figurePages.push({ count:0, notes:[] });
+    if (doc.figurePages.length > doc.pages.length) doc.figurePages.length = doc.pages.length;
+    for (let i=0;i<doc.figurePages.length;i++) {
+      const entry = doc.figurePages[i];
+      if (!entry || typeof entry !== 'object') doc.figurePages[i] = { count:0, notes:[] };
+      else {
+        if (!Number.isFinite(entry.count)) entry.count = Array.isArray(entry.notes) ? entry.notes.length : 0;
+        if (!Array.isArray(entry.notes)) entry.notes = [];
+        if (entry.sprite && (!Number.isFinite(entry.sprite.w) || !Number.isFinite(entry.sprite.h) || !Array.isArray(entry.sprite.runs))) entry.sprite = null;
+      }
+    }
+    return doc;
+  }
+
+  function currentFigures(doc, pageIndex) {
+    if (!doc || !Array.isArray(doc.figurePages)) return { count:0, notes:[] };
+    const entry = doc.figurePages[pageIndex];
+    if (!entry || typeof entry !== 'object') return { count:0, notes:[] };
+    return { count:Math.max(0, Number(entry.count)||0), notes:Array.isArray(entry.notes)?entry.notes:[], sprite:entry.sprite||null, fallbackReason:String(entry.fallbackReason||'') };
+  }
+
+  function paintSprite(canvas,sprite,scale) {
+    if (!canvas || !sprite) return;
+    const s=Math.max(1,scale||2), w=sprite.w|0, h=sprite.h|0;
+    canvas.width=w*s; canvas.height=h*s;
+    const c=canvas.getContext('2d'); c.imageSmoothingEnabled=false;
+    c.fillStyle='#e8f3e9'; c.fillRect(0,0,canvas.width,canvas.height);
+    c.fillStyle='#174d2b';
+    for (const run of sprite.runs||[]) c.fillRect((run[1]|0)*s,(run[0]|0)*s,(run[2]|0)*s,s);
+  }
+
+  function makeId(file) {
+    const seed = file.name + '|' + file.size + '|' + file.lastModified + '|' + Math.random();
+    let h = 2166136261;
+    for (let i=0;i<seed.length;i++) { h ^= seed.charCodeAt(i); h = Math.imul(h,16777619); }
+    return 'pdf-' + (h>>>0).toString(16) + '-' + String(file.lastModified || 0);
+  }
+
+  function renderLibrary() {
+    $('libraryCount').textContent = docs.length + (docs.length === 1 ? ' document' : ' documents');
+    if (!docs.length) {
+      $('library').innerHTML = '<div class="empty">No PDFs yet. Tap <b>Add PDFs</b> to build your library.</div>';
+      return;
+    }
+    $('library').innerHTML = docs.map(d => {
+      migrateDoc(d);
+      const current = active && active.id === d.id;
+      const page = clamp((d.position && d.position.page || 0)+1, 1, Math.max(1,d.pages.length));
+      const totalFigures = (d.figurePages || []).reduce((sum, entry) => sum + Math.max(0, Number(entry && entry.count)||0), 0);
+      return '<div class="doc">' +
+        '<div><div class="docTitle">' + esc(d.name) + '</div>' +
+        '<div class="meta">' + d.pages.length + ' pages · ' + humanBytes(d.size||0) + ' · ' + totalFigures + ' visuals · last position page ' + page + '</div></div>' +
+        '<div class="docActions"><button data-open="' + esc(d.id) + '">' + (current ? 'Reading' : 'Read') + '</button>' +
+        '<button class="secondary" data-rename="' + esc(d.id) + '">Rename</button>' +
+        '<button class="danger" data-delete="' + esc(d.id) + '">Delete</button></div></div>';
+    }).join('');
+    $('library').querySelectorAll('[data-open]').forEach(b => b.onclick = () => activate(b.dataset.open));
+    $('library').querySelectorAll('[data-delete]').forEach(b => b.onclick = () => removeDocument(b.dataset.delete));
+    $('library').querySelectorAll('[data-rename]').forEach(b => b.onclick = () => renameDocument(b.dataset.rename));
+  }
+
+  function wrapText(text, mode) {
+    const maxChars = mode === 'large' ? 28 : 36;
+    const maxLines = mode === 'large' ? 7 : 9;
+    const paragraphs = String(text || '').replace(/\r/g,'').split(/\n+/);
+    const lines = [];
+    for (let p=0;p<paragraphs.length;p++) {
+      let words = paragraphs[p].trim().split(/\s+/).filter(Boolean);
+      if (!words.length) { if (lines.length && lines[lines.length-1] !== '') lines.push(''); continue; }
+      let line = '';
+      for (let w of words) {
+        while (w.length > maxChars) {
+          if (line) { lines.push(line); line=''; }
+          lines.push(w.slice(0,maxChars)); w = w.slice(maxChars);
+        }
+        if (!w) continue;
+        if (!line) line = w;
+        else if ((line + ' ' + w).length <= maxChars) line += ' ' + w;
+        else { lines.push(line); line = w; }
+      }
+      if (line) lines.push(line);
+      if (p < paragraphs.length-1 && lines.length && lines[lines.length-1] !== '') lines.push('');
+    }
+    while (lines.length && lines[lines.length-1] === '') lines.pop();
+    return { lines:lines.length ? lines : ['[No extractable text on this page]'], maxLines };
+  }
+
+  function pageLayout(doc, pageIndex) {
+    return wrapText(doc.pages[pageIndex] || '', doc.position.mode || 'normal');
+  }
+  function pageChunks(doc,pageIndex) {
+    const l = pageLayout(doc,pageIndex);
+    return Math.max(1, Math.ceil(l.lines.length / l.maxLines));
+  }
+
+  function normalizePosition(doc) {
+    migrateDoc(doc);
+    if (!doc.position) doc.position = { page:0, chunk:0, mode:'normal' };
+    doc.position.mode = doc.position.mode === 'large' ? 'large' : 'normal';
+    doc.position.page = clamp(Number(doc.position.page)||0,0,Math.max(0,doc.pages.length-1));
+    doc.position.chunk = clamp(Number(doc.position.chunk)||0,0,pageChunks(doc,doc.position.page)-1);
+  }
+
+  function currentView(doc) {
+    normalizePosition(doc);
+    const page = doc.position.page;
+    const chunk = doc.position.chunk;
+    const layout = pageLayout(doc,page);
+    const start = chunk * layout.maxLines;
+    const lines = layout.lines.slice(start,start+layout.maxLines);
+    while (lines.length < layout.maxLines) lines.push('');
+    const figures = currentFigures(doc, page);
+    return {
+      type:'view', title:doc.name, page:page+1, pageCount:doc.pages.length,
+      chunk:chunk+1, chunkCount:pageChunks(doc,page), lines,
+      mode:doc.position.mode, chrome:true,
+      figureCount:figures.count,
+      figureNotes:figures.notes
+    };
+  }
+
+  function cacheModelKey(doc,mode) {
+    return String(doc.id) + '|' + String(mode) + '|' + String(doc.pages.length) + '|' + String(doc.addedAt||'');
+  }
+
+  function buildScreenModel(doc,mode) {
+    const key=cacheModelKey(doc,mode);
+    if(screenModelCache.has(key)) return screenModelCache.get(key);
+    const descriptors=[], pageStarts=[], chunkCounts=[];
+    for(let page=0;page<doc.pages.length;page++) {
+      pageStarts[page]=descriptors.length;
+      const layout=wrapText(doc.pages[page]||'',mode);
+      const count=Math.max(1,Math.ceil(layout.lines.length/layout.maxLines));
+      chunkCounts[page]=count;
+      for(let chunk=0;chunk<count;chunk++) descriptors.push({page,chunk,chunkCount:count});
+    }
+    const model={key,mode,descriptors,pageStarts,chunkCounts,total:descriptors.length};
+    screenModelCache.set(key,model);
+    return model;
+  }
+
+  function resetCacheSession() { cacheSession=null; }
+
+  function ensureCacheSession(doc,forceNew) {
+    const mode=doc.position.mode==='large'?'large':'normal';
+    const model=buildScreenModel(doc,mode), key=String(doc.id)+'|'+mode;
+    if(forceNew||!cacheSession||cacheSession.key!==key) {
+      cacheSession={key,revision:'mpr-cache-'+(++cacheSerial)+'-'+String(doc.id),model};
+    } else if(cacheSession.model.key!==model.key) cacheSession.model=model;
+    return cacheSession;
+  }
+
+  function screenIndexForPosition(doc,model) {
+    normalizePosition(doc);
+    const page=clamp(doc.position.page,0,Math.max(0,model.pageStarts.length-1));
+    return clamp((model.pageStarts[page]||0)+doc.position.chunk,0,Math.max(0,model.total-1));
+  }
+
+  function applyScreenIndex(doc,model,index) {
+    const d=model.descriptors[clamp(Number(index)||0,0,Math.max(0,model.total-1))];
+    if(!d)return;
+    doc.position.page=d.page; doc.position.chunk=d.chunk;
+  }
+
+  function cachedScreen(doc,model,index,layoutCache) {
+    const d=model.descriptors[index]; if(!d)return null;
+    let layout=layoutCache.get(d.page);
+    if(!layout){layout=wrapText(doc.pages[d.page]||'',model.mode);layoutCache.set(d.page,layout);}
+    const start=d.chunk*layout.maxLines, lines=layout.lines.slice(start,start+layout.maxLines);
+    while(lines.length<layout.maxLines)lines.push('');
+    const figures=currentFigures(doc,d.page);
+    return {page:d.page+1,chunk:d.chunk+1,chunkCount:d.chunkCount,lines,figureCount:figures.count};
+  }
+
+  function cacheWindowBounds(total,center,direction) {
+    center=clamp(Number(center)||0,0,Math.max(0,total-1));
+    let back=direction<0?32:16, forward=direction<0?16:32;
+    let start=Math.max(0,center-back), end=Math.min(total,center+forward+1);
+    if(end-start<CACHE_WINDOW_SIZE) {
+      if(start===0) end=Math.min(total,CACHE_WINDOW_SIZE);
+      else if(end===total) start=Math.max(0,total-CACHE_WINDOW_SIZE);
+    }
+    return {start,end};
+  }
+
+  function serializedUtf8Bytes(value) {
+    const json=JSON.stringify(value);
+    if(typeof TextEncoder!=='undefined') return new TextEncoder().encode(json).length;
+    let bytes=0;
+    for(let i=0;i<json.length;i++) {
+      const code=json.charCodeAt(i);
+      if(code<=0x7F) bytes++;
+      else if(code<=0x7FF) bytes+=2;
+      else if(code>=0xD800&&code<=0xDBFF&&i+1<json.length) {
+        const next=json.charCodeAt(i+1);
+        if(next>=0xDC00&&next<=0xDFFF) { bytes+=4; i++; }
+        else bytes+=3;
+      } else bytes+=3;
+    }
+    return bytes;
+  }
+
+  function cacheBundleFits(bundle) {
+    try { return serializedUtf8Bytes(bundle)<=CACHE_MESSAGE_BYTE_LIMIT; }
+    catch(e) { return false; }
+  }
+
+  function makeCacheBundle(doc,centerIndex,forcePosition,direction) {
+    const session=ensureCacheSession(doc,false), model=session.model;
+    const center=clamp(Number(centerIndex)||0,0,Math.max(0,model.total-1));
+    const travel=Number(direction)||1;
+    const base={type:'cache-bundle',revision:session.revision,docId:doc.id,title:bridgeTitle(doc.name),pageCount:doc.pages.length,mode:model.mode,totalScreens:model.total,centerIndex:center,forcePosition:!!forcePosition};
+    const layouts=new Map();
+    if(model.total<=CACHE_FULL_SCREEN_LIMIT) {
+      const screens=[]; for(let i=0;i<model.total;i++) screens.push(cachedScreen(doc,model,i,layouts));
+      const full=Object.assign({},base,{full:true,startIndex:0,screens});
+      if(cacheBundleFits(full)) return full;
+    }
+    const bounds=cacheWindowBounds(model.total,center,travel), screens=[];
+    for(let i=bounds.start;i<bounds.end;i++) screens.push(cachedScreen(doc,model,i,layouts));
+    let start=bounds.start;
+    const rolling=Object.assign({},base,{full:false,startIndex:start,screens});
+    // Keep every logical companion payload within the same conservative UTF-8
+    // byte ceiling. If Unicode-heavy text makes the normal 49-screen window
+    // too large, trim the less-useful side first while always retaining center.
+    while(!cacheBundleFits(rolling)&&rolling.screens.length>1) {
+      const end=start+rolling.screens.length-1;
+      if(travel<0) {
+        if(end>center) rolling.screens.pop();
+        else if(start<center) { rolling.screens.shift(); start++; rolling.startIndex=start; }
+        else break;
+      } else {
+        if(start<center) { rolling.screens.shift(); start++; rolling.startIndex=start; }
+        else if(end>center) rolling.screens.pop();
+        else break;
+      }
+    }
+    return rolling;
+  }
+
+  function setCacheStatus(bundle) {
+    if(!$('cacheStatus'))return;
+    if(!bundle){$('cacheStatus').textContent='';return;}
+    if(bundle.full) $('cacheStatus').textContent='Glasses cache: entire document · '+bundle.totalScreens+' reading screens';
+    else $('cacheStatus').textContent='Glasses cache: hybrid · '+bundle.screens.length+' of '+bundle.totalScreens+' nearby screens';
+  }
+
+  function sendCacheBundle(options) {
+    if(!active){bridge.sendToApp({type:'no-document'});setCacheStatus(null);return;}
+    normalizePosition(active);
+    const session=ensureCacheSession(active,false);
+    const center=options&&Number.isFinite(options.centerIndex)?options.centerIndex:screenIndexForPosition(active,session.model);
+    const bundle=makeCacheBundle(active,center,!(options&&options.forcePosition===false),options&&options.direction);
+    setCacheStatus(bundle); bridge.sendToApp(bundle);
+  }
+
+  function renderViewer() {
+    if (!active) { $('viewer').hidden=true; if($('cacheStatus'))$('cacheStatus').textContent=''; return; }
+    normalizePosition(active);
+    $('viewer').hidden=false;
+    $('activeTitle').textContent = active.name;
+    $('activeMeta').textContent = active.pages.length + ' PDF pages · ' + humanBytes(active.size||0);
+    $('textSize').value = active.position.mode;
+    $('pageJump').max = Math.max(1,active.pages.length);
+    $('pageJump').value = active.position.page + 1;
+    const v = currentView(active);
+    $('preview').textContent = v.lines.filter(Boolean).join('\n');
+    $('progressText').textContent = 'PDF page ' + v.page + ' of ' + v.pageCount + ' · screen ' + v.chunk + ' of ' + v.chunkCount;
+    const figures = currentFigures(active, active.position.page);
+    $('figureTools').hidden = !(figures.count > 0);
+    if (figures.count > 0) {
+      const hasSprite=!!figures.sprite;
+      $('showFigureBtn').textContent=hasSprite?'Show figure on glasses':'Show visual note on glasses';
+      $('figureMeta').textContent = figures.count + (figures.count === 1 ? ' visual detected. ' : ' visuals detected. ') + (hasSprite?'A compact Mira bitmap is ready.':(figures.fallbackReason||figures.notes[0]||'This visual will use the note-card fallback.'));
+      $('showFigureBtn').disabled = false;
+      $('figurePreview').hidden=!hasSprite;
+      if(hasSprite) paintSprite($('figurePreview'),figures.sprite,2);
+    } else {
+      $('figureMeta').textContent = '';
+      $('showFigureBtn').disabled = true;
+      $('figurePreview').hidden=true;
+    }
+    $('prevBtn').disabled = v.page === 1 && v.chunk === 1;
+    $('nextBtn').disabled = v.page === v.pageCount && v.chunk === v.chunkCount;
+  }
+
+  function scheduleSave(doc) {
+    const target = doc || active;
+    if (!target || !target.id) return;
+    const previous = saveTimers.get(target.id);
+    if (previous) clearTimeout(previous);
+    const timer = setTimeout(() => {
+      saveTimers.delete(target.id);
+      putDoc(target).catch(()=>{});
+    }, 250);
+    saveTimers.set(target.id, timer);
+  }
+
+  async function flushPendingSaves() {
+    const pending=[];
+    for (const [id,timer] of saveTimers) {
+      clearTimeout(timer);
+      const target=docs.find(d=>d&&d.id===id) || (active&&active.id===id?active:null);
+      if(target) pending.push(putDoc(target).catch(()=>{}));
+    }
+    saveTimers.clear();
+    if(pending.length) await Promise.all(pending);
+  }
+
+  function clearSearchState() {
+    $('searchBox').value='';
+    $('searchResults').hidden=true;
+    $('searchResults').innerHTML='';
+  }
+
+  function sendView() { sendCacheBundle({forcePosition:true,direction:1}); }
+
+  function sendFigureNote() {
+    if (!active) return;
+    normalizePosition(active);
+    const info = currentFigures(active, active.position.page);
+    if (!(info.count > 0)) return;
+    bridge.sendToApp({
+      type:'figure',
+      title:bridgeTitle(active.name),
+      page:active.position.page + 1,
+      pageCount:active.pages.length,
+      figureCount:info.count,
+      figureNotes:info.notes.slice(0,3),
+      sprite:info.sprite||null,
+      fallbackReason:info.fallbackReason||''
+    });
+  }
+
+  async function activate(id, position) {
+    const d = docs.find(x => x.id === id);
+    if (!d) return;
+    const switchingDocuments = !active || active.id !== d.id;
+    if (switchingDocuments) { clearSearchState(); resetCacheSession(); }
+    active = d;
+    normalizePosition(active);
+    if (position) {
+      active.position.page = clamp(position.page||0,0,active.pages.length-1);
+      active.position.chunk = clamp(position.chunk||0,0,pageChunks(active,active.position.page)-1);
+    }
+    localStorage.setItem('miraPdfActiveId', active.id);
+    renderLibrary(); renderViewer(); scheduleSave(); sendView();
+  }
+
+  function move(delta) {
+    if (!active || !delta) return;
+    normalizePosition(active);
+    if (delta > 0) {
+      const chunks = pageChunks(active,active.position.page);
+      if (active.position.chunk + 1 < chunks) active.position.chunk++;
+      else if (active.position.page + 1 < active.pages.length) { active.position.page++; active.position.chunk=0; }
+    } else {
+      if (active.position.chunk > 0) active.position.chunk--;
+      else if (active.position.page > 0) { active.position.page--; active.position.chunk=pageChunks(active,active.position.page)-1; }
+    }
+    renderViewer(); scheduleSave(); sendView();
+  }
+
+  async function removeDocument(id) {
+    const d = docs.find(x=>x.id===id); if (!d) return;
+    if (!confirm('Delete "' + d.name + '" from this Mira PDF library?')) return;
+    const pendingSave=saveTimers.get(id); if(pendingSave){ clearTimeout(pendingSave); saveTimers.delete(id); }
+    await deleteDoc(id);
+    docs = docs.filter(x=>x.id!==id);
+    if (active && active.id===id) { active=null; clearSearchState(); localStorage.removeItem('miraPdfActiveId'); $('viewer').hidden=true; bridge.sendToApp({type:'no-document'}); }
+    renderLibrary();
+  }
+
+  async function renameDocument(id) {
+    const d = docs.find(x=>x.id===id); if (!d) return;
+    const name = prompt('Document name', d.name.replace(/\.pdf$/i,''));
+    if (name == null || !name.trim()) return;
+    d.name = name.trim();
+    await putDoc(d);
+    if (active && active.id===id) { active=d; resetCacheSession(); }
+    renderLibrary(); renderViewer(); sendView();
+  }
+
+  function normalizedSearchSource(text) {
+    const src=String(text||''), chars=[], map=[];
+    let pendingSpace=false, pendingIndex=0;
+    for(let i=0;i<src.length;i++) {
+      if(/\s/.test(src[i])) { if(chars.length){ pendingSpace=true; pendingIndex=i; } continue; }
+      if(pendingSpace) { chars.push(' '); map.push(pendingIndex); pendingSpace=false; }
+      chars.push(src[i]); map.push(i);
+    }
+    return {text:chars.join(''),map};
+  }
+
+  function searchActive() {
+    if (!active) return;
+    const q = $('searchBox').value.trim();
+    const box = $('searchResults');
+    if (!q) { box.hidden=true; box.innerHTML=''; return; }
+    const needle=q.replace(/\s+/g,' ').trim().toLocaleLowerCase();
+    if(!needle){ box.hidden=true; box.innerHTML=''; return; }
+    const results=[];
+    for (let p=0;p<active.pages.length;p++) {
+      const text=active.pages[p]||'', normalized=normalizedSearchSource(text), low=normalized.text.toLocaleLowerCase();
+      let from=0;
+      while (results.length<40) {
+        const atNorm=low.indexOf(needle,from); if (atNorm<0) break;
+        const at=normalized.map[atNorm] == null ? 0 : normalized.map[atNorm];
+        const endNorm=Math.min(normalized.map.length-1,atNorm+Math.max(0,needle.length-1));
+        const originalEnd=normalized.map[endNorm] == null ? at+q.length : normalized.map[endNorm]+1;
+        const left=Math.max(0,at-70), right=Math.min(text.length,originalEnd+110);
+        results.push({page:p, at, snippet:(left?'…':'')+text.slice(left,right).replace(/\s+/g,' ')+(right<text.length?'…':'')});
+        from=atNorm+Math.max(1,needle.length);
+      }
+      if (results.length>=40) break;
+    }
+    box.hidden=false;
+    if (!results.length) { box.innerHTML='<div class="empty">No matches.</div>'; return; }
+    box.innerHTML='<div class="meta" style="margin:10px 0 4px">' + results.length + (results.length===40?' first':'') + ' matches</div>' + results.map((r,i)=>
+      '<div class="searchItem" data-result="'+i+'"><strong>Page '+(r.page+1)+'</strong><div class="snippet">'+esc(r.snippet)+'</div></div>').join('');
+    box.querySelectorAll('[data-result]').forEach(el => el.onclick=()=>jumpToSearch(results[Number(el.dataset.result)],q));
+  }
+
+  function wrappedLineForOffset(text,target,mode) {
+    const maxChars = mode === 'large' ? 28 : 36;
+    const src = String(text || '').replace(/\r/g,'');
+    target = clamp(Number(target)||0,0,Math.max(0,src.length-1));
+    let lineIndex=0, cursor=0;
+    const paragraphRe=/[^\n]+/g;
+    let pm, lastParagraphEnd=0;
+    while((pm=paragraphRe.exec(src))) {
+      if(pm.index>lastParagraphEnd && lineIndex>0) lineIndex++; // wrapText inserts one blank line between paragraphs.
+      const paragraph=pm[0], base=pm.index, words=[];
+      for(const wm of paragraph.matchAll(/\S+/g)) words.push({text:wm[0],start:base+wm.index,end:base+wm.index+wm[0].length});
+      let lineLen=0, lineStart=-1, lineEnd=-1;
+      function finishLine(){
+        if(lineStart>=0) {
+          if(target>=lineStart && target<lineEnd) return true;
+          lineIndex++;
+        }
+        lineLen=0; lineStart=-1; lineEnd=-1; return false;
+      }
+      for(const word of words) {
+        let partStart=word.start, remaining=word.text;
+        while(remaining.length>maxChars) {
+          if(finishLine()) return lineIndex;
+          const partEnd=partStart+maxChars;
+          if(target>=partStart && target<partEnd) return lineIndex;
+          lineIndex++;
+          remaining=remaining.slice(maxChars); partStart=partEnd;
+        }
+        if(!remaining) continue;
+        if(lineLen===0) { lineStart=partStart; lineEnd=word.end; lineLen=remaining.length; }
+        else if(lineLen+1+remaining.length<=maxChars) { lineEnd=word.end; lineLen+=1+remaining.length; }
+        else {
+          if(finishLine()) return lineIndex;
+          lineStart=partStart; lineEnd=word.end; lineLen=remaining.length;
+        }
+      }
+      if(finishLine()) return lineIndex;
+      lastParagraphEnd=pm.index+pm[0].length;
+      cursor=lastParagraphEnd;
+    }
+    return Math.max(0,lineIndex-1);
+  }
+
+  function jumpToSearch(result,q) {
+    if (!active) return;
+    active.position.page=result.page;
+    const layout=pageLayout(active,result.page);
+    const lineIndex=wrappedLineForOffset(active.pages[result.page]||'',result.at,active.position.mode||'normal');
+    active.position.chunk=clamp(Math.floor(lineIndex/layout.maxLines),0,Math.max(0,pageChunks(active,result.page)-1));
+    renderViewer(); scheduleSave(); sendView();
+    $('preview').scrollIntoView({behavior:'smooth',block:'nearest'});
+  }
+
+  function setImportStatus(text,isWarn) {
+    $('importStatus').innerHTML = text;
+    $('importStatus').className = 'status' + (isWarn?' warn':'');
+  }
+
+  async function importFiles(fileList) {
+    const files=Array.from(fileList||[]).filter(f=>/\.pdf$/i.test(f.name)||f.type==='application/pdf');
+    if (!files.length) return;
+    const failures=[];
+    let imported=0;
+    for (let i=0;i<files.length;i++) {
+      const file=files[i];
+      try {
+        setImportStatus('<span class="spinner"></span>Reading ' + esc(file.name) + ' ('+(i+1)+' of '+files.length+')…');
+        const bytes=new Uint8Array(await file.arrayBuffer());
+        const parsed=await extractPdfPages(bytes, progress => setImportStatus('<span class="spinner"></span>' + esc(file.name) + ': ' + esc(progress)));
+        const doc=migrateDoc({ id:makeId(file), name:file.name, size:file.size, addedAt:new Date().toISOString(), pages:parsed.pages, figurePages:parsed.figurePages, blob:file, position:{page:0,chunk:0,mode:'normal'} });
+        await putDoc(doc);
+        docs=docs.filter(d=>d.id!==doc.id); docs.unshift(doc);
+        imported++;
+        if (!active) active=doc;
+      } catch (e) {
+        console.error(e);
+        failures.push({name:file.name,message:String(e && e.message || e)});
+      }
+    }
+    docs.sort((a,b)=>String(b.addedAt||'').localeCompare(String(a.addedAt||'')));
+    renderLibrary();
+    if (active) { await activate(active.id); }
+    if (failures.length) {
+      const detail=failures.map(f=>'Could not import <b>'+esc(f.name)+'</b>: '+esc(f.message)).join('<br>');
+      setImportStatus('Import finished: '+imported+' of '+files.length+' succeeded.<br>'+detail+'<br>Search requires a text layer; scanned-image text still needs OCR.', true);
+    } else {
+      setImportStatus('Import finished: '+imported+' of '+files.length+' succeeded. Search works on PDFs that contain an actual text layer. Scanned-image PDFs need OCR.');
+    }
+    $('fileInput').value='';
+  }
+
+  $('addPdf').onclick=()=>$('fileInput').click();
+  $('fileInput').onchange=e=>importFiles(e.target.files);
+  $('refreshLibrary').onclick=async()=>{
+    const activeId=active&&active.id;
+    await flushPendingSaves();
+    docs=(await getAll()).map(migrateDoc);
+    docs.sort((a,b)=>String(b.addedAt||'').localeCompare(String(a.addedAt||'')));
+    active=activeId?docs.find(d=>d.id===activeId)||null:null;
+    resetCacheSession();
+    if(active) localStorage.setItem('miraPdfActiveId',active.id);
+    else if(activeId) { localStorage.removeItem('miraPdfActiveId'); clearSearchState(); }
+    renderLibrary(); renderViewer(); sendView();
+  };
+  $('prevBtn').onclick=()=>move(-1);
+  $('nextBtn').onclick=()=>move(1);
+  $('startBtn').onclick=()=>{ if(active){active.position.page=0;active.position.chunk=0;renderViewer();scheduleSave();sendView();} };
+  $('jumpBtn').onclick=()=>{ if(active){active.position.page=clamp((Number($('pageJump').value)||1)-1,0,active.pages.length-1);active.position.chunk=0;renderViewer();scheduleSave();sendView();} };
+  $('searchBtn').onclick=searchActive;
+  $('searchBox').onkeydown=e=>{ if(e.key==='Enter') searchActive(); };
+  $('clearSearch').onclick=clearSearchState;
+  $('showFigureBtn').onclick=sendFigureNote;
+  $('textSize').onchange=()=>{ if(active){active.position.mode=$('textSize').value==='large'?'large':'normal'; active.position.chunk=0; resetCacheSession(); renderViewer(); scheduleSave(); sendView();} };
+
+  function syncPositionFromGlasses(message,allowSwitch) {
+    if(!message)return false;
+    let d=active, switched=false;
+    if(!d||d.id!==message.docId) {
+      if(!allowSwitch)return false;
+      d=docs.find(x=>x.id===message.docId); if(!d)return false;
+      active=d; switched=true; resetCacheSession(); localStorage.setItem('miraPdfActiveId',d.id);
+    }
+    normalizePosition(d);
+    // Text size is a phone-side preference. A stale glasses cache may report
+    // its old mode, but it must never roll the phone back from Normal/Large.
+    // Chunk numbers are mode-dependent, so only accept cached position when
+    // the glasses cache uses the phone's current mode.
+    const glassesMode=message.mode==='large'?'large':(message.mode==='normal'?'normal':'');
+    if(glassesMode&&glassesMode!==d.position.mode) {
+      if(switched){renderLibrary();renderViewer();scheduleSave(d);}
+      return false;
+    }
+    if(Number.isFinite(message.page)) d.position.page=clamp(Number(message.page)-1,0,Math.max(0,d.pages.length-1));
+    if(Number.isFinite(message.chunk)) d.position.chunk=clamp(Number(message.chunk)-1,0,pageChunks(d,d.position.page)-1);
+    renderLibrary(); renderViewer(); scheduleSave(d); return true;
+  }
+
+  // On reconnect the phone owns document selection. A cached glasses position
+  // may update the active document only when both sides refer to the same PDF.
+  // If the phone truly has no active document, the glasses may restore theirs.
+  function syncReconnectPosition(local) {
+    if(!local||!local.docId)return false;
+    if(active) {
+      if(active.id!==local.docId)return false;
+      return syncPositionFromGlasses(local,false);
+    }
+    return syncPositionFromGlasses(local,true);
+  }
+
+  let stopBridge=null, bridgeListenerAttached=false;
+  function handleBridgeMessage(message) {
+    if (!message) return;
+    if (message.type==='ready') {
+      glassesReady=true; $('glassStatus').textContent='Glasses: connected';
+      syncReconnectPosition(message.local);
+      resetCacheSession(); sendView();
+    } else if (message.type==='cache-position') {
+      const session=active&&ensureCacheSession(active,false);
+      if(session&&message.revision===session.revision&&message.docId===active.id) syncPositionFromGlasses(message,false);
+    } else if (message.type==='cache-refill') {
+      const session=active&&ensureCacheSession(active,false);
+      if(session&&message.revision===session.revision&&message.docId===active.id) {
+        syncPositionFromGlasses(message,false);
+        sendCacheBundle({centerIndex:clamp(Number(message.index)||0,0,Math.max(0,session.model.total-1)),forcePosition:false,direction:Number(message.direction)||1});
+      }
+    } else if (message.type==='navigate') {
+      // Compatibility fallback for a glasses cache that has not loaded yet.
+      move(Number(message.delta)||0);
+    } else if (message.type==='request-view') {
+      sendView();
+    } else if (message.type==='closed-document') {
+      // Glasses intentionally returned to the waiting screen; keep phone selection.
+    } else if (message.type==='stop') {
+      syncReconnectPosition(message.local);
+      glassesReady=false; $('glassStatus').textContent='Glasses: waiting';
+    }
+  }
+  function attachBridgeListener() {
+    if(bridgeListenerAttached)return;
+    stopBridge=bridge.onFromApp(handleBridgeMessage);
+    bridgeListenerAttached=true;
+  }
+  function detachBridgeListener() {
+    if(!bridgeListenerAttached)return;
+    const stop=stopBridge; stopBridge=null; bridgeListenerAttached=false;
+    try{if(typeof stop==='function')stop();}catch(e){}
+  }
+  attachBridgeListener();
+  window.addEventListener('pagehide',()=>{
+    // Start IndexedDB writes before the companion web view is torn down.
+    // pagehide cannot reliably await asynchronous work, so flush first and
+    // let any already-open transactions finish while the page is closing.
+    try{ void flushPendingSaves(); }catch(e){}
+    // A page restored from the back/forward cache keeps its JS state. Detach
+    // cleanly here and pageshow will reinstall the companion listener.
+    detachBridgeListener();
+  });
+  window.addEventListener('pageshow',()=>{
+    if(!bridgeListenerAttached) {
+      attachBridgeListener();
+      // Reannounce the companion so a still-running glasses cache can resume
+      // position sync and rolling-window refills after a bfcache restore.
+      try{bridge.sendToApp({type:'companion-ready'});}catch(e){}
+    }
+  });
+
+  async function init() {
+    try {
+      db=await openDB(); docs=(await getAll()).map(migrateDoc); docs.sort((a,b)=>String(b.addedAt||'').localeCompare(String(a.addedAt||'')));
+      renderLibrary();
+      const id=localStorage.getItem('miraPdfActiveId');
+      const d=docs.find(x=>x.id===id) || docs[0];
+      if (d) await activate(d.id);
+      bridge.sendToApp({type:'companion-ready'});
+    } catch (e) {
+      setImportStatus('Document storage is unavailable in this phone web view: ' + esc(e.message||e), true);
+    }
+  }
+
+  /* ---------------- Self-contained PDF text + simple figure extractor ----------------
+     Text: unfiltered, Flate, ASCII85/Hex, ToUnicode, inherited resources and Forms.
+     Figures: best-effort DeviceGray/DeviceRGB raster XObjects (1/8-bit, simple/PNG
+     predictors). They become small run-length Mira sprites; JPEG, masks, indexed,
+     transparency-heavy, vector-only, and overly complex artwork deliberately fall back to notes. */
+
+  function bytesToBinary(bytes) {
+    let out='', chunk=0x8000;
+    for (let i=0;i<bytes.length;i+=chunk) out += String.fromCharCode.apply(null, bytes.subarray(i,Math.min(bytes.length,i+chunk)));
+    return out;
+  }
+  function binaryToBytes(s) { const a=new Uint8Array(s.length); for(let i=0;i<s.length;i++) a[i]=s.charCodeAt(i)&255; return a; }
+  function latin1(bytes) { try{return new TextDecoder('windows-1252').decode(bytes);}catch(e){return bytesToBinary(bytes);} }
+  function findBalanced(text,start,open,close) {
+    let depth=0, i=start;
+    while(i<text.length) {
+      const c=text[i];
+      if(c==='%') { while(i<text.length&&text[i]!=='\r'&&text[i]!=='\n') i++; continue; }
+      if(c==='(') { i=skipPdfLiteralString(text,i); continue; }
+      if(c==='<'&&text[i+1]!=='<') { i++; while(i<text.length&&text[i]!=='>')i++; if(i<text.length)i++; continue; }
+      if (text.startsWith(open,i)) { depth++; i+=open.length; continue; }
+      if (text.startsWith(close,i)) { depth--; i+=close.length; if(depth===0) return text.slice(start,i); continue; }
+      i++;
+    }
+    return '';
+  }
+  function skipPdfTrivia(text,i) {
+    while(i<text.length) {
+      while(i<text.length&&(text[i]===' '||text[i]==='\t'||text[i]==='\f'||text[i]==='\0'||text[i]==='\r'||text[i]==='\n')) i++;
+      if(text[i]==='%') { while(i<text.length&&text[i]!=='\r'&&text[i]!=='\n') i++; continue; }
+      break;
+    }
+    return i;
+  }
+  function skipPdfLiteralString(text,i) {
+    if(text[i]!=='(') return i;
+    i++; let depth=1;
+    while(i<text.length&&depth) {
+      const c=text[i++];
+      if(c==='\\') { if(i<text.length){ if(text[i]==='\r'&&text[i+1]==='\n')i+=2; else i++; } continue; }
+      if(c==='(') depth++;
+      else if(c===')') depth--;
+    }
+    return i;
+  }
+  function pdfTokenDelimiter(c) { return !c || c===' '||c==='\t'||c==='\f'||c==='\0'||c==='\r'||c==='\n'||/[\[\]<>{}()/%]/.test(c); }
+  function decodePdfName(raw) { return String(raw||'').replace(/#([0-9A-Fa-f]{2})/g,(_,h)=>String.fromCharCode(parseInt(h,16))); }
+  function findPdfDictionaryStart(text) {
+    const src=String(text||''); let i=0;
+    while(i<src.length) {
+      const c=src[i];
+      if(c==='%') { while(i<src.length&&src[i]!=='\r'&&src[i]!=='\n')i++; continue; }
+      if(c==='(') { i=skipPdfLiteralString(src,i); continue; }
+      if(c==='<'&&src[i+1]!=='<') { i++; while(i<src.length&&src[i]!=='>')i++; if(i<src.length)i++; continue; }
+      if(src.startsWith('<<',i)) return i;
+      i++;
+    }
+    return -1;
+  }
+  function pdfValueSpan(text,start) {
+    const src=String(text||''); let i=skipPdfTrivia(src,Math.max(0,start||0));
+    if(i>=src.length)return {value:'',start:i,end:i};
+    let end=i;
+    if(src.startsWith('<<',i)) { const v=findBalanced(src,i,'<<','>>')||''; end=i+v.length; return {value:v,start:i,end}; }
+    if(src[i]==='[') { const v=findBalanced(src,i,'[',']')||''; end=i+v.length; return {value:v,start:i,end}; }
+    if(src[i]==='(') { end=skipPdfLiteralString(src,i); return {value:src.slice(i,end),start:i,end}; }
+    if(src[i]==='<'&&src[i+1]!=='<') { let j=i+1; while(j<src.length&&src[j]!=='>')j++; end=Math.min(src.length,j+1); return {value:src.slice(i,end),start:i,end}; }
+    if(src[i]==='/') { let j=i+1; while(j<src.length&&!pdfTokenDelimiter(src[j]))j++; end=j; return {value:src.slice(i,end),start:i,end}; }
+    const rest=src.slice(i), ref=/^(\d+)\s+(\d+)\s+R\b/.exec(rest);
+    if(ref) { end=i+ref[0].length; return {value:ref[0],start:i,end}; }
+    let j=i; while(j<src.length&&!pdfTokenDelimiter(src[j]))j++;
+    if(j===i)j++;
+    end=j; return {value:src.slice(i,end),start:i,end};
+  }
+  function pdfValueAt(text,start) { return pdfValueSpan(text,start).value; }
+  function parsePdfDictionaryEntries(text) {
+    const src=String(text||''), entries=[];
+    const di=findPdfDictionaryStart(src); if(di<0)return entries;
+    let i=di+2;
+    while(i<src.length) {
+      i=skipPdfTrivia(src,i); if(i>=src.length||src.startsWith('>>',i))break;
+      if(src[i]!=='/') {
+        const stray=pdfValueSpan(src,i); i=stray.end>i?stray.end:i+1; continue;
+      }
+      const keyStart=i, begin=++i; while(i<src.length&&!pdfTokenDelimiter(src[i]))i++;
+      const key=decodePdfName(src.slice(begin,i));
+      const valueSpan=pdfValueSpan(src,i);
+      if(!valueSpan.value) { i=Math.max(i+1,valueSpan.end); continue; }
+      entries.push({key,value:valueSpan.value,keyStart,valueStart:valueSpan.start,end:valueSpan.end});
+      i=valueSpan.end;
+    }
+    return entries;
+  }
+  function findTopLevelDictValueStart(text,key) {
+    for(const entry of parsePdfDictionaryEntries(text)) if(entry.key===key) return entry.valueStart;
+    return -1;
+  }
+  function pdfDictValue(text,key) {
+    let found='';
+    for(const entry of parsePdfDictionaryEntries(text)) if(entry.key===key) found=entry.value;
+    return found;
+  }
+  function resolvePdfValue(value,objects,depth) {
+    depth=depth||0; if(depth>8)return '';
+    const raw=String(value||''), start=skipPdfTrivia(raw,0), src=raw.slice(start).trim();
+    const ref=/^(\d+)\s+\d+\s+R\b/.exec(src);
+    if(ref&&objects&&objects.get(Number(ref[1]))) return resolvePdfValue(objects.get(Number(ref[1])).body,objects,depth+1);
+    return src;
+  }
+  function resolvedPdfDictValue(text,key,objects) { return resolvePdfValue(pdfDictValue(text,key),objects,0); }
+  function resolvedPdfName(text,key,objects) {
+    const v=resolvedPdfDictValue(text,key,objects), m=/^\/([^\s\[\]<>{}()/%]+)/.exec(v); return m?decodePdfName(m[1]):'';
+  }
+  function findPdfKeyword(text,keyword,from) {
+    let i=Math.max(0,from||0);
+    const white=c=>!c||c===' '||c==='\t'||c==='\f'||c==='\0'||c==='\r'||c==='\n';
+    const delim=c=>!c||white(c)||/[\[\]<>{}()%]/.test(c);
+    while(i<text.length) {
+      const c=text[i];
+      if(c==='%') { while(i<text.length&&text[i]!=='\r'&&text[i]!=='\n')i++; continue; }
+      if(c==='(') { i=skipPdfLiteralString(text,i); continue; }
+      if(c==='<'&&text[i+1]!=='<') { i++; while(i<text.length&&text[i]!=='>')i++; if(i<text.length)i++; continue; }
+      if(c==='/') { i++; while(i<text.length&&!delim(text[i])&&text[i]!=='/')i++; continue; }
+      if(text.startsWith(keyword,i)) {
+        const before=i===0?'':text[i-1], after=text[i+keyword.length]||'';
+        if((i===0||white(before)||/[\[\]<>{}()%]/.test(before))&&before!=='/'&&delim(after)) return i;
+      }
+      i++;
+    }
+    return -1;
+  }
+  function streamTokenInfo(body) {
+    const di=body.indexOf('<<');
+    if(di<0) return null;
+    const dictText=findBalanced(body,di,'<<','>>');
+    if(!dictText) return null;
+    let si=skipPdfTrivia(body,di+dictText.length);
+    if(!body.startsWith('stream',si) || /[A-Za-z0-9]/.test(body[si+6]||'')) return null;
+    let start=si+6;
+    while(start<body.length&&(body[start]===' '||body[start]==='\t')) start++;
+    if(body[start]==='\r'&&body[start+1]==='\n') start+=2;
+    else if(body[start]==='\n'||body[start]==='\r') start++;
+    else return null;
+    return {si,start,dict:body.slice(0,di+dictText.length)};
+  }
+  function indexPdfObjects(bytes) {
+    const binary=bytesToBinary(bytes), objects=new Map(), simpleNumbers=new Map();
+    // Resolve simple indirect integer objects up front. Stream /Length is often
+    // indirect, and knowing it lets us step over arbitrary binary stream bytes
+    // without treating embedded PDF-looking words as structure.
+    const numberRe=/(^|[\x00\t\n\f\r ])(\d+)\s+(\d+)\s+obj\b\s*([-+]?\d+)\s*endobj\b/g;
+    let nm;
+    while((nm=numberRe.exec(binary))) if(!simpleNumbers.has(Number(nm[2]))) simpleNumbers.set(Number(nm[2]),Number(nm[4]));
+    // PDF objects only need whitespace separation; they do not need to begin on a new line.
+    const re=/(^|[\x00\t\n\f\r ])(\d+)\s+(\d+)\s+obj\b/g;
+    let m;
+    while((m=re.exec(binary))) {
+      const num=Number(m[2]), gen=Number(m[3]), bodyStart=re.lastIndex;
+      const tail=binary.slice(bodyStart), info=streamTokenInfo(tail);
+      let end=-1;
+      if(info) {
+        let endStream=-1, length=null;
+        const indirect=/\/Length\s+(\d+)\s+\d+\s+R\b/.exec(info.dict);
+        const direct=/\/Length\s+(\d+)\b/.exec(info.dict);
+        if(indirect && simpleNumbers.has(Number(indirect[1]))) length=simpleNumbers.get(Number(indirect[1]));
+        else if(direct) length=Number(direct[1]);
+        if(Number.isFinite(length) && length>=0) {
+          let q=bodyStart+info.start+length;
+          q=skipPdfTrivia(binary,q);
+          if(binary.startsWith('endstream',q)) endStream=q;
+        }
+        if(endStream<0) {
+          // Without a usable /Length, prefer an endstream whose next structural
+          // token is endobj. This is much safer than accepting the first literal.
+          let q=bodyStart+info.start;
+          while(q<binary.length) {
+            const candidate=binary.indexOf('endstream',q); if(candidate<0) break;
+            const after=skipPdfTrivia(binary,candidate+9);
+            if(binary.startsWith('endobj',after)) { endStream=candidate; break; }
+            q=candidate+9;
+          }
+          if(endStream<0) endStream=binary.indexOf('endstream',bodyStart+info.start);
+        }
+        if(endStream>=0) {
+          const after=skipPdfTrivia(binary,endStream+9);
+          if(binary.startsWith('endobj',after)) end=after;
+          else end=findPdfKeyword(binary,'endobj',endStream+9);
+        }
+      } else {
+        // Non-stream objects may legally contain the characters "endobj" inside
+        // literal strings, comments, hex strings, or PDF names. Only accept the
+        // real structural keyword outside those contexts.
+        end=findPdfKeyword(binary,'endobj',bodyStart);
+      }
+      if(end<0) break;
+      const body=binary.slice(bodyStart,end);
+      objects.set(num,{num,gen,body}); re.lastIndex=end+6;
+    }
+    return {binary,objects};
+  }
+  function filterNames(dict,objects,depth) {
+    depth=depth||0; if(depth>6)return [];
+    const value=pdfDictValue(dict,'Filter'); if(!value)return [];
+    const resolved=resolvePdfValue(value,objects,depth);
+    if(!resolved)return [];
+    if(resolved.startsWith('[')) return Array.from(resolved.matchAll(/\/([^\s\[\]<>{}()/%]+)/g)).map(x=>decodePdfName(x[1]));
+    const m=/^\/([^\s\[\]<>{}()/%]+)/.exec(resolved); return m?[decodePdfName(m[1])]:[];
+  }
+  function resolveNumberValue(text,objects,depth) {
+    depth=depth||0; if(depth>6) return 0;
+    const raw=String(text||''), start=skipPdfTrivia(raw,0), src=raw.slice(start).trim();
+    const ref=/^(\d+)\s+\d+\s+R\b/.exec(src);
+    if(ref&&objects&&objects.get(Number(ref[1]))) return resolveNumberValue(objects.get(Number(ref[1])).body,objects,depth+1);
+    const num=/^[-+]?(?:\d+(?:\.\d*)?|\.\d+)/.exec(src);
+    return num?Number(num[0]):0;
+  }
+  function resolveNumberProperty(dict,key,objects) {
+    return resolveNumberValue(pdfDictValue(dict,key),objects,0);
+  }
+  function decodeParmsText(dict,objects) {
+    let value=pdfDictValue(dict,'DecodeParms')||pdfDictValue(dict,'DP'); if(!value)return '';
+    value=resolvePdfValue(value,objects,0);
+    if(value.startsWith('<<'))return value;
+    if(!value.startsWith('['))return '';
+    const entries=[]; let i=1;
+    while(i<value.length-1) {
+      i=skipPdfTrivia(value,i); if(i>=value.length-1)break;
+      const item=pdfValueAt(value,i); if(!item)break; entries.push(item); i+=item.length;
+    }
+    const filters=filterNames(dict,objects), fi=filters.findIndex(f=>f==='FlateDecode'||f==='Fl');
+    if(fi>=0&&fi<entries.length) { const chosen=resolvePdfValue(entries[fi],objects,0); if(chosen.startsWith('<<'))return chosen; }
+    for(const entry of entries) { const chosen=resolvePdfValue(entry,objects,0); if(chosen.startsWith('<<')&&findTopLevelDictValueStart(chosen,'Predictor')>=0)return chosen; }
+    return '';
+  }
+  function asciiHexDecode(bytes) {
+    const s=bytesToBinary(bytes).replace(/\s+/g,'').replace(/>.*/, ''); let hex=s; if(hex.length%2) hex+='0';
+    const out=new Uint8Array(hex.length/2); for(let i=0;i<out.length;i++) out[i]=parseInt(hex.slice(i*2,i*2+2),16)||0; return out;
+  }
+  function ascii85Decode(bytes) {
+    let s=bytesToBinary(bytes).replace(/\s+/g,'').replace(/^<~/,'').replace(/~>$/,''); const out=[]; let group=[];
+    for(let i=0;i<s.length;i++) {
+      const c=s.charCodeAt(i);
+      if(s[i]==='z' && group.length===0) { out.push(0,0,0,0); continue; }
+      if(c<33||c>117) continue;
+      group.push(c-33);
+      if(group.length===5) { let n=0; for(let j=0;j<5;j++) n=n*85+group[j]; out.push((n>>>24)&255,(n>>>16)&255,(n>>>8)&255,n&255); group=[]; }
+    }
+    if(group.length) { const keep=group.length-1; while(group.length<5) group.push(84); let n=0; for(let j=0;j<5;j++) n=n*85+group[j]; const tmp=[(n>>>24)&255,(n>>>16)&255,(n>>>8)&255,n&255]; out.push(...tmp.slice(0,keep)); }
+    return new Uint8Array(out);
+  }
+  async function flateDecode(bytes) {
+    if (typeof DecompressionStream==='undefined') throw new Error('This phone browser cannot decompress common PDF streams.');
+    const ds=new DecompressionStream('deflate');
+    const ab=await new Response(new Blob([bytes]).stream().pipeThrough(ds)).arrayBuffer();
+    return new Uint8Array(ab);
+  }
+  function rawStream(obj,objects) {
+    const b=obj.body, info=streamTokenInfo(b); if(!info) return null;
+    const dict=info.dict;
+    const start=info.start;
+    let length=resolveNumberProperty(dict,'Length',objects);
+    function followedByEndstream(pos) {
+      let p=pos;
+      while(p<b.length && (b[p]===' '||b[p]==='\t'||b[p]==='\r'||b[p]==='\n'||b[p]==='\f'||b[p]==='\0')) p++;
+      return b.startsWith('endstream',p);
+    }
+    if(Number.isFinite(length) && length>=0 && start+length<=b.length && followedByEndstream(start+length)) {
+      return {dict,bytes:binaryToBytes(b.slice(start,start+length))};
+    }
+    // Some producers have an off-by-one /Length. Prefer the actual endstream marker
+    // when the declared boundary does not line up with the stream terminator.
+    const ei=b.lastIndexOf('endstream'); if(ei<start) return null;
+    let end=ei; if(end>start&&b[end-1]==='\n')end--; if(end>start&&b[end-1]==='\r')end--;
+    return { dict, bytes:binaryToBytes(b.slice(start,end)) };
+  }
+
+  function imageParams(dict,objects) {
+    const colorValue=resolvedPdfDictValue(dict,'ColorSpace',objects);
+    const colorMatch=/^\/([^\s\[\]<>{}()/%]+)/.exec(colorValue), color=colorMatch?decodePdfName(colorMatch[1]):'';
+    const bpc=Math.max(0,Math.round(resolveNumberProperty(dict,'BitsPerComponent',objects)||0));
+    const dp=decodeParmsText(dict,objects);
+    const decodeValue=resolvedPdfDictValue(dict,'Decode',objects);
+    let decodeText=''; if(decodeValue.startsWith('[')){const arr=findBalanced(decodeValue,0,'[',']')||decodeValue;decodeText=arr.slice(1,-1);}
+    const decode=decodeText?Array.from(decodeText.matchAll(/[-+]?(?:\d*\.)?\d+/g)).map(m=>Number(m[0])):[];
+    const imageMask=/^(?:true|1)\b/i.test(resolvedPdfDictValue(dict,'ImageMask',objects));
+    const hasMask=!!(pdfDictValue(dict,'SMask')||pdfDictValue(dict,'Mask'));
+    return { color, bpc, predictor:Number((/\/Predictor\s+(\d+)/.exec(dp)||[,'1'])[1])||1, columns:Number((/\/Columns\s+(\d+)/.exec(dp)||[,'0'])[1])||0, colors:Number((/\/Colors\s+(\d+)/.exec(dp)||[,'0'])[1])||0, imageMask, hasMask, decode };
+  }
+
+  function undoPredictor(data,width,height,colors,bpc,predictor) {
+    if(!predictor||predictor===1)return data;
+    const rowBytes=Math.ceil(width*colors*bpc/8), bpp=Math.max(1,Math.ceil(colors*bpc/8));
+    if(predictor===2) {
+      if(data.length<rowBytes*height) return null;
+      const out=data.slice();
+      if(bpc<8 && (bpc===1||bpc===2||bpc===4)) {
+        const mask=(1<<bpc)-1, samplesPerRow=width*colors;
+        function getSample(row,sample) {
+          const bit=sample*bpc, byte=row+(bit>>3), shift=8-bpc-(bit&7);
+          return (out[byte]>>shift)&mask;
+        }
+        function setSample(row,sample,value) {
+          const bit=sample*bpc, byte=row+(bit>>3), shift=8-bpc-(bit&7), clear=~(mask<<shift)&255;
+          out[byte]=(out[byte]&clear)|((value&mask)<<shift);
+        }
+        for(let y=0;y<height;y++) {
+          const row=y*rowBytes;
+          for(let sample=colors;sample<samplesPerRow;sample++) {
+            setSample(row,sample,(getSample(row,sample)+getSample(row,sample-colors))&mask);
+          }
+        }
+      } else {
+        for(let y=0;y<height;y++)for(let x=bpp;x<rowBytes;x++){const i=y*rowBytes+x;out[i]=(out[i]+out[i-bpp])&255;}
+      }
+      return out;
+    }
+    if(predictor<10||predictor>15)return null;
+    if(data.length<height*(rowBytes+1))return null;
+    const out=new Uint8Array(rowBytes*height), prev=new Uint8Array(rowBytes);
+    for(let y=0,si=0;y<height;y++){
+      const type=data[si++], row=out.subarray(y*rowBytes,(y+1)*rowBytes);
+      for(let x=0;x<rowBytes;x++){
+        const raw=data[si++], a=x>=bpp?row[x-bpp]:0, b=prev[x]||0, c=x>=bpp?(prev[x-bpp]||0):0;
+        let add=0;
+        if(type===1)add=a; else if(type===2)add=b; else if(type===3)add=Math.floor((a+b)/2); else if(type===4){const p=a+b-c,pa=Math.abs(p-a),pb=Math.abs(p-b),pc=Math.abs(p-c);add=pa<=pb&&pa<=pc?a:(pb<=pc?b:c);} else if(type!==0)return null;
+        row[x]=(raw+add)&255;
+      }
+      prev.set(row);
+    }
+    return out;
+  }
+
+  function spriteFromPixels(data,width,height,colors,bpc,decode) {
+    if(width<2||height<2||width*height>16000000)return null;
+    const maxW=120,maxH=72,scale=Math.min(1,maxW/width,maxH/height),w=Math.max(1,Math.round(width*scale)),h=Math.max(1,Math.round(height*scale));
+    const dark=new Uint8Array(w*h), bayer=[0,8,2,10,12,4,14,6,3,11,1,9,15,7,13,5];
+    function decodedSample(sample,component,maxSample) {
+      const d0=Array.isArray(decode)&&decode.length>=component*2+2&&Number.isFinite(decode[component*2])?decode[component*2]:0;
+      const d1=Array.isArray(decode)&&decode.length>=component*2+2&&Number.isFinite(decode[component*2+1])?decode[component*2+1]:1;
+      const mapped=d0+(sample/maxSample)*(d1-d0);
+      return Math.round(Math.max(0,Math.min(1,mapped))*255);
+    }
+    function grayAt(x,y){
+      const p=y*width+x;
+      if(bpc===1){
+        const rowBytes=Math.ceil(width/8), byteIndex=y*rowBytes+(x>>3);
+        const v=(data[byteIndex]>>(7-(x&7)))&1;
+        return decodedSample(v,0,1);
+      }
+      const i=p*colors;
+      if(colors===1)return decodedSample(data[i],0,255);
+      const r=decodedSample(data[i],0,255),g=decodedSample(data[i+1],1,255),b=decodedSample(data[i+2],2,255);
+      return Math.round((r*54+g*183+b*19)/256);
+    }
+    for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+      const sx=Math.min(width-1,Math.floor((x+.5)*width/w)),sy=Math.min(height-1,Math.floor((y+.5)*height/h));
+      const threshold=104+bayer[(y&3)*4+(x&3)]*6; dark[y*w+x]=grayAt(sx,sy)<threshold?1:0;
+    }
+    const runs=[];
+    for(let y=0;y<h;y++){let x=0;while(x<w){while(x<w&&!dark[y*w+x])x++;const start=x;while(x<w&&dark[y*w+x])x++;if(x>start)runs.push([y,start,x-start]);}}
+    if(runs.length<2||runs.length>900)return null;
+    return {w,h,runs};
+  }
+
+  async function extractPdfPages(bytes,onProgress) {
+    const indexed=indexPdfObjects(bytes), objects=indexed.objects;
+    if (!objects.size) throw new Error('This does not appear to be a readable PDF.');
+    const streamCache=new Map(), cmapCache=new Map(), fontCache=new Map(), resourceCache=new Map(), xobjectMetaCache=new Map();
+
+    async function decodedStream(num) {
+      if(streamCache.has(num)) return streamCache.get(num);
+      const p=(async()=>{
+        const obj=objects.get(num); if(!obj) return null; const rs=rawStream(obj,objects); if(!rs) return null;
+        let data=rs.bytes;
+        for(const f of filterNames(rs.dict,objects)) {
+          if(f==='FlateDecode'||f==='Fl') data=await flateDecode(data);
+          else if(f==='ASCII85Decode'||f==='A85') data=ascii85Decode(data);
+          else if(f==='ASCIIHexDecode'||f==='AHx') data=asciiHexDecode(data);
+          else throw new Error('Unsupported PDF stream filter: '+f);
+        }
+        return data;
+      })(); streamCache.set(num,p); return p;
+    }
+
+    async function expandObjectStreams() {
+      const streams=[];
+      for(const [num,obj] of objects) if(resolvedPdfName(obj.body,'Type',objects)==='ObjStm') streams.push(num);
+      for(const num of streams) {
+        const obj=objects.get(num); if(!obj) continue;
+        const count=resolveNumberProperty(obj.body,'N',objects), first=resolveNumberProperty(obj.body,'First',objects);
+        if(!count&&!first) continue;
+        if(!Number.isFinite(count)||count<1||count>100000||!Number.isFinite(first)||first<0) continue;
+        const data=await decodedStream(num); if(!data||first>data.length) continue;
+        const binary=bytesToBinary(data), header=binary.slice(0,first);
+        const nums=Array.from(header.matchAll(/[-+]?\d+/g)).map(m=>Number(m[0]));
+        if(nums.length<count*2) continue;
+        const entries=[];
+        for(let i=0;i<count;i++) {
+          const objectNum=nums[i*2], offset=nums[i*2+1];
+          if(!Number.isInteger(objectNum)||objectNum<1||!Number.isFinite(offset)||offset<0) continue;
+          entries.push({objectNum,offset});
+        }
+        for(let i=0;i<entries.length;i++) {
+          const start=first+entries[i].offset;
+          const end=i+1<entries.length?first+entries[i+1].offset:data.length;
+          if(start<first||end<start||end>data.length) continue;
+          if(!objects.has(entries[i].objectNum)) {
+            const body=bytesToBinary(data.subarray(start,end)).trim();
+            objects.set(entries[i].objectNum,{num:entries[i].objectNum,gen:0,body,compressedIn:num});
+          }
+        }
+      }
+    }
+
+    await expandObjectStreams();
+
+    function utf16be(hex) {
+      const clean=hex.replace(/\s+/g,''); const arr=new Uint8Array(Math.floor(clean.length/2)); for(let i=0;i<arr.length;i++)arr[i]=parseInt(clean.slice(i*2,i*2+2),16)||0;
+      try { return new TextDecoder('utf-16be').decode(arr); } catch(e) { let s=''; for(let i=0;i+1<arr.length;i+=2)s+=String.fromCharCode((arr[i]<<8)|arr[i+1]); return s; }
+    }
+    function parseCMap(text) {
+      const map=new Map(); let codeLen=1;
+      for(const block of text.matchAll(/beginbfchar([\s\S]*?)endbfchar/g)) {
+        for(const m of block[1].matchAll(/<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>/g)) { const k=m[1].toUpperCase(); map.set(k,utf16be(m[2])); codeLen=Math.max(codeLen,k.length/2); }
+      }
+      for(const block of text.matchAll(/beginbfrange([\s\S]*?)endbfrange/g)) {
+        const s=block[1];
+        for(const m of s.matchAll(/<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>/g)) {
+          let a=parseInt(m[1],16), b=parseInt(m[2],16), dst=m[3]; codeLen=Math.max(codeLen,m[1].length/2);
+          let base=utf16be(dst), cp=base.codePointAt(0);
+          for(let v=a;v<=b&&v-a<4096;v++) { const key=v.toString(16).toUpperCase().padStart(m[1].length,'0'); map.set(key,Number.isFinite(cp)?String.fromCodePoint(cp+(v-a)):base); }
+        }
+        for(const m of s.matchAll(/<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*\[([\s\S]*?)\]/g)) {
+          let a=parseInt(m[1],16), vals=Array.from(m[3].matchAll(/<([0-9A-Fa-f]+)>/g)).map(x=>x[1]); codeLen=Math.max(codeLen,m[1].length/2);
+          for(let j=0;j<vals.length;j++){ const key=(a+j).toString(16).toUpperCase().padStart(m[1].length,'0'); map.set(key,utf16be(vals[j])); }
+        }
+      }
+      return {map,codeLen};
+    }
+    async function fontInfo(fontNum) {
+      if(fontCache.has(fontNum)) return fontCache.get(fontNum);
+      const p=(async()=>{
+        const o=objects.get(fontNum); if(!o) return {cmap:null,codeLen:1};
+        const toUnicodeValue=pdfDictValue(o.body,'ToUnicode'), t=/^(\d+)\s+\d+\s+R\b/.exec(toUnicodeValue);
+        if(t) {
+          const n=Number(t[1]); if(cmapCache.has(n)) return cmapCache.get(n);
+          const data=await decodedStream(n); const info=data?parseCMap(latin1(data)):{map:new Map(),codeLen:1}; cmapCache.set(n,info); return info;
+        }
+        return {map:null,codeLen:1};
+      })(); fontCache.set(fontNum,p); return p;
+    }
+
+    function dictAfter(body,label) {
+      const key=String(label||'').replace(/^\//,'');
+      const value=pdfDictValue(body,key); if(!value)return '';
+      const resolved=resolvePdfValue(value,objects,0);
+      return resolved.startsWith('<<')?resolved:'';
+    }
+    function parseNamedRefs(dict) {
+      const m=new Map();
+      for(const entry of parsePdfDictionaryEntries(dict)) {
+        const ref=/^(\d+)\s+\d+\s+R\b/.exec(String(entry.value||'').trim());
+        if(ref) m.set(entry.key,Number(ref[1]));
+      }
+      return m;
+    }
+    function resourceInfo(objNum,depth) {
+      const key=String(objNum)+'|'+String(depth||0); if(resourceCache.has(key)) return resourceCache.get(key);
+      const o=objects.get(objNum); if(!o) return {fonts:new Map(),xobjects:new Map()};
+      let body=o.body, resBody=dictAfter(body,'/Resources');
+      if(!resBody) {
+        const parentValue=pdfDictValue(body,'Parent'), pr=/^(\d+)\s+\d+\s+R\b/.exec(parentValue);
+        if(pr && (depth||0)<12) { const inherited=resourceInfo(Number(pr[1]),(depth||0)+1); resourceCache.set(key,inherited); return inherited; }
+      }
+      let fontBody=dictAfter(resBody,'/Font'), xoBody=dictAfter(resBody,'/XObject');
+      const info={fonts:parseNamedRefs(fontBody),xobjects:parseNamedRefs(xoBody)}; resourceCache.set(key,info); return info;
+    }
+    function effectiveResourceInfo(objNum,inherited) {
+      const o=objects.get(objNum);
+      if(inherited && o && resolvedPdfName(o.body,'Subtype',objects)==='Form' && !pdfDictValue(o.body,'Resources')) return inherited;
+      return resourceInfo(objNum,0);
+    }
+    function xobjectMeta(objNum) {
+      if (xobjectMetaCache.has(objNum)) return xobjectMetaCache.get(objNum);
+      const o = objects.get(objNum);
+      if (!o) {
+        const empty = { subtype:'', width:0, height:0, objectNum:objNum };
+        xobjectMetaCache.set(objNum, empty);
+        return empty;
+      }
+      const body = o.body;
+      const subtype = resolvedPdfName(body,'Subtype',objects);
+      const width = Math.max(0,Math.round(resolveNumberProperty(body,'Width',objects)||0));
+      const height = Math.max(0,Math.round(resolveNumberProperty(body,'Height',objects)||0));
+      const rs=rawStream(o,objects), params=imageParams(rs?rs.dict:body,objects);
+      const meta = { subtype, width, height, objectNum:objNum, params };
+      xobjectMetaCache.set(objNum, meta);
+      return meta;
+    }
+
+    function parseLiteral(src,i) {
+      i++; const out=[]; let depth=1;
+      while(i<src.length&&depth) {
+        let c=src[i++];
+        if(c==='\\') {
+          if(i>=src.length) break; let n=src[i++];
+          if(n==='n')out.push(10); else if(n==='r')out.push(13); else if(n==='t')out.push(9); else if(n==='b')out.push(8); else if(n==='f')out.push(12);
+          else if(n==='\n'){} else if(n==='\r'){ if(src[i]==='\n')i++; }
+          else if(/[0-7]/.test(n)){ let oct=n; for(let k=0;k<2&&/[0-7]/.test(src[i]||'');k++)oct+=src[i++]; out.push(parseInt(oct,8)&255); }
+          else out.push(n.charCodeAt(0)&255);
+        } else if(c==='(') { depth++; out.push(40); }
+        else if(c===')') { depth--; if(depth)out.push(41); }
+        else out.push(c.charCodeAt(0)&255);
+      }
+      return [{t:'str',bytes:new Uint8Array(out)},i];
+    }
+    function isPdfWhite(c) { return c==='\0'||c==='\t'||c==='\n'||c==='\f'||c==='\r'||c===' '; }
+    function isPdfBoundary(c) { return !c || isPdfWhite(c) || /[\[\]<>{}\/()%]/.test(c); }
+    function stripInlineImages(src) {
+      let out='', cursor=0, i=0, count=0, ignoredGlyphs=0;
+      function skipLiteral(at) { const r=parseLiteral(src,at); return r[1]; }
+      function skipHex(at) { at++; while(at<src.length&&src[at]!=='>')at++; return Math.min(src.length,at+1); }
+      function findToken(from,token) {
+        let p=from;
+        while(p<src.length) {
+          const c=src[p];
+          if(c==='%'){ while(p<src.length&&src[p]!=='\n'&&src[p]!=='\r')p++; continue; }
+          if(c==='('){ p=skipLiteral(p); continue; }
+          if(c==='<'&&src[p+1]!=='<'){ p=skipHex(p); continue; }
+          if(src.startsWith(token,p)&&isPdfBoundary(src[p-1])&&isPdfBoundary(src[p+token.length])) return p;
+          p++;
+        }
+        return -1;
+      }
+      function looksLikeBitmapGlyph(header) {
+        const w=Number(((/(?:\/W|\/Width)\s+(\d+)/.exec(header))||[,'0'])[1])||0;
+        const h=Number(((/(?:\/H|\/Height)\s+(\d+)/.exec(header))||[,'0'])[1])||0;
+        const bpc=Number(((/(?:\/BPC|\/BitsPerComponent)\s+(\d+)/.exec(header))||[,'0'])[1])||0;
+        const mask=/(?:\/IM|\/ImageMask)\s+true\b/.test(header);
+        // Type-3/bitmap fonts commonly paint tiny 1-bit stencil glyphs with BI/ID/EI.
+        // Ignore those as figures while retaining normal inline photos/diagrams.
+        return w>0&&h>0&&w<=64&&h<=64&&(mask||bpc===1);
+      }
+      while(i<src.length) {
+        const c=src[i];
+        if(c==='%'){ while(i<src.length&&src[i]!=='\n'&&src[i]!=='\r')i++; continue; }
+        if(c==='('){ i=skipLiteral(i); continue; }
+        if(c==='<'&&src[i+1]!=='<'){ i=skipHex(i); continue; }
+        if(src.startsWith('BI',i)&&isPdfBoundary(src[i-1])&&isPdfBoundary(src[i+2])) {
+          const id=findToken(i+2,'ID'); if(id<0){i+=2;continue;}
+          const header=src.slice(i+2,id);
+          let dataStart=id+2;
+          if(src[dataStart]==='\r'&&src[dataStart+1]==='\n')dataStart+=2; else if(isPdfWhite(src[dataStart]))dataStart++;
+          let ei=-1;
+          for(let p=dataStart+1;p+1<src.length;p++) {
+            if(src[p]==='E'&&src[p+1]==='I'&&isPdfWhite(src[p-1])&&isPdfBoundary(src[p+2])) { ei=p; break; }
+          }
+          if(ei<0){ i=dataStart; continue; }
+          out+=src.slice(cursor,i)+' ';
+          cursor=ei+2; i=cursor;
+          if(looksLikeBitmapGlyph(header)) ignoredGlyphs++; else count++;
+          continue;
+        }
+        i++;
+      }
+      out+=src.slice(cursor);
+      return {src:out,count,ignoredGlyphs};
+    }
+    function tokenize(src) {
+      let i=0;
+      function skip(){ while(i<src.length){ const c=src[i]; if(/\s/.test(c)){i++;continue;} if(c==='%'){while(i<src.length&&src[i]!=='\n'&&src[i]!=='\r')i++;continue;} break; } }
+      function one(){ skip(); if(i>=src.length)return null; const c=src[i];
+        if(c==='('){ const r=parseLiteral(src,i); i=r[1]; return r[0]; }
+        if(c==='<'){ if(src[i+1]==='<'){i+=2;return {t:'op',v:'<<'};} i++; let h=''; while(i<src.length&&src[i]!=='>')h+=src[i++]; if(i<src.length)i++; h=h.replace(/\s+/g,''); if(h.length%2)h+='0'; const a=new Uint8Array(h.length/2); for(let j=0;j<a.length;j++)a[j]=parseInt(h.slice(j*2,j*2+2),16)||0; return {t:'str',bytes:a}; }
+        if(c==='>'&&src[i+1]==='>'){i+=2;return {t:'op',v:'>>'};}
+        if(c==='>'){i++;return {t:'op',v:'>'};}
+        if(c==='['){ i++; const a=[]; while(true){ skip(); if(i>=src.length)break; if(src[i]===']'){i++;break;} const before=i,t=one(); if(t)a.push(t); if(i===before)i++; } return {t:'array',items:a}; }
+        if(c===']'){i++;return {t:'op',v:']'};}
+        if(c==='/'){ i++; let s=''; while(i<src.length&&!/[\s<>\[\]()\/%]/.test(src[i]))s+=src[i++]; return {t:'name',v:s}; }
+        if(c==="'"||c==='"'){i++;return {t:'op',v:c};}
+        let s=''; while(i<src.length&&!/[\s<>\[\]()\/%'\"]/.test(src[i]))s+=src[i++];
+        if(!s){ i++; return {t:'op',v:c}; }
+        if(/^[-+]?\d*\.?\d+$/.test(s))return {t:'num',v:Number(s)}; return {t:'op',v:s};
+      }
+      const out=[]; while(i<src.length){const before=i,t=one();if(t)out.push(t);if(i===before)i++;} return out;
+    }
+    async function decodeString(tok,fontNum) {
+      const b=tok.bytes||new Uint8Array(); if(!b.length)return '';
+      if(b.length>=2&&b[0]===0xFE&&b[1]===0xFF){ let s='';for(let i=2;i+1<b.length;i+=2)s+=String.fromCharCode((b[i]<<8)|b[i+1]);return s; }
+      if(fontNum) {
+        const info=await fontInfo(fontNum);
+        if(info.map && info.map.size) { let out=''; const len=Math.max(1,info.codeLen); for(let i=0;i<b.length;){ let took=0,val=''; for(let l=Math.min(len,b.length-i);l>=1;l--){ let h='';for(let j=0;j<l;j++)h+=b[i+j].toString(16).toUpperCase().padStart(2,'0'); if(info.map.has(h)){val=info.map.get(h);took=l;break;} } if(!took){val=String.fromCharCode(b[i]);took=1;} out+=val;i+=took;} return out; }
+      }
+      return latin1(b);
+    }
+
+    async function contentText(streamNum,resOwner,depth,inheritedResources) {
+      if((depth||0)>6) return '';
+      const data=await decodedStream(streamNum); if(!data)return '';
+      const cleaned=stripInlineImages(bytesToBinary(data)), tokens=tokenize(cleaned.src), stack=[], res=effectiveResourceInfo(resOwner,inheritedResources);
+      let currentFont=null, out='';
+      function add(s,forceSpace){ s=String(s||'').replace(/\u0000/g,''); if(!s)return; if(forceSpace&&out&&!/[\s\n]$/.test(out)&&!/^[,.;:!?\)\]]/.test(s))out+=' '; out+=s; }
+      function nl(){ if(out&&!/\n$/.test(out))out+='\n'; }
+      const handled=new Set(['Tf','Tj','TJ','Td','TD','T*',"'",'"','ET','Do']);
+      for(const t of tokens) {
+        if(t.t!=='op'){ stack.push(t); continue; }
+        const op=t.v;
+        if(!handled.has(op)){ stack.length=0; continue; }
+        if(op==='Tf') { const size=stack.pop(), name=stack.pop(); currentFont=name&&name.t==='name'?res.fonts.get(name.v)||null:null; stack.length=0; }
+        else if(op==='Tj') { const st=stack.pop(); if(st&&st.t==='str')add(await decodeString(st,currentFont),true); stack.length=0; }
+        else if(op==='TJ') { const a=stack.pop(); if(a&&a.t==='array'){ let first=true; for(const x of a.items){ if(x.t==='str'){add(await decodeString(x,currentFont),first);first=false;} else if(x.t==='num'&&x.v<-140)add(' ',false); } } stack.length=0; }
+        else if(op==="'") { const st=stack.pop(); nl(); if(st&&st.t==='str')add(await decodeString(st,currentFont),false); stack.length=0; }
+        else if(op==='"') { const st=stack.pop(); nl(); if(st&&st.t==='str')add(await decodeString(st,currentFont),false); stack.length=0; }
+        else if(op==='Td'||op==='TD'||op==='T*'||op==='ET') { nl(); stack.length=0; }
+        else if(op==='Do') { const n=stack.pop(); if(n&&n.t==='name'&&res.xobjects.has(n.v)){ const xo=res.xobjects.get(n.v), meta=xobjectMeta(xo); if(meta.subtype==='Form'){ const child=await contentText(xo,xo,(depth||0)+1,res); if(child){nl();add(child,false);nl();} } } stack.length=0; }
+      }
+      return out.replace(/[ \t]+\n/g,'\n').replace(/\n{3,}/g,'\n\n').replace(/[ \t]{2,}/g,' ').trim();
+    }
+
+    async function figureScan(streamNum,resOwner,depth,seen,inheritedResources) {
+      if((depth||0)>6) return { count:0, maxArea:0, images:[], vectorDetected:false, inlineDetected:false };
+      const key = String(streamNum) + '|' + String(resOwner);
+      if (seen.has(key)) return { count:0, maxArea:0, images:[], vectorDetected:false, inlineDetected:false };
+      const pathSeen=new Set(seen); pathSeen.add(key);
+      const data=await decodedStream(streamNum); if(!data)return { count:0, maxArea:0, images:[], vectorDetected:false, inlineDetected:false };
+      const cleaned=stripInlineImages(bytesToBinary(data)), tokens=tokenize(cleaned.src), stack=[], res=effectiveResourceInfo(resOwner,inheritedResources);
+      let count = cleaned.count, maxArea = 0, images=[], pathOps=0, paintOps=0, rectOps=0, vectorDetected=false, inlineDetected=cleaned.count>0;
+      const pathNames={m:1,l:1,c:1,v:1,y:1,h:1,re:1};
+      const paintNames={S:1,s:1,f:1,F:1,'f*':1,B:1,'B*':1,b:1,'b*':1};
+      for(const t of tokens) {
+        if(t.t!=='op'){ stack.push(t); continue; }
+        if(pathNames[t.v]) { pathOps++; if(t.v==='re') rectOps++; }
+        if(paintNames[t.v]) paintOps++;
+        if(t.v==='Do') {
+          const n=stack.pop();
+          if(n&&n.t==='name'&&res.xobjects.has(n.v)) {
+            const xo=res.xobjects.get(n.v);
+            const meta=xobjectMeta(xo);
+            if(meta.subtype==='Image') {
+              count++;
+              maxArea=Math.max(maxArea, (meta.width||0)*(meta.height||0));
+              images.push(meta);
+            } else if(meta.subtype==='Form') {
+              const nested=await figureScan(xo,xo,(depth||0)+1,pathSeen,res);
+              count+=nested.count;
+              maxArea=Math.max(maxArea,nested.maxArea);
+              images=images.concat(nested.images||[]);
+              vectorDetected=vectorDetected||!!nested.vectorDetected;
+              inlineDetected=inlineDetected||!!nested.inlineDetected;
+            }
+          }
+        }
+        stack.length=0;
+      }
+      // Heuristic: ignore isolated rules/borders, but flag diagram-like vector artwork.
+      if((paintOps>=2&&pathOps>=4)||(paintOps>=1&&pathOps>=10)||(paintOps>=1&&rectOps>=3)) vectorDetected=true;
+      return { count, maxArea, images, vectorDetected, inlineDetected };
+    }
+
+    async function renderImageSprite(meta) {
+      if(!meta||meta.subtype!=='Image')return {sprite:null,reason:'No supported raster image was found.'};
+      const o=objects.get(meta.objectNum),rs=o&&rawStream(o,objects),p=meta.params||{};
+      if(!rs)return {sprite:null,reason:'The figure stream could not be read.'};
+      if(p.imageMask||p.hasMask)return {sprite:null,reason:'This masked or transparent figure uses the visual-note fallback.'};
+      const colors=p.color==='DeviceGray'?1:(p.color==='DeviceRGB'?3:0);
+      if(!colors||![1,8].includes(p.bpc)||(p.bpc===1&&colors!==1))return {sprite:null,reason:'This color format is too complex for a compact Mira bitmap.'};
+      let data=rs.bytes;
+      try {
+        for(const f of filterNames(rs.dict,objects)){
+          if(f==='FlateDecode'||f==='Fl')data=await flateDecode(data);else if(f==='ASCII85Decode'||f==='A85')data=ascii85Decode(data);else if(f==='ASCIIHexDecode'||f==='AHx')data=asciiHexDecode(data);else return {sprite:null,reason:'This compressed figure uses the visual-note fallback.'};
+        }
+      } catch(e){return {sprite:null,reason:'The figure could not be safely decompressed.'};}
+      data=undoPredictor(data,meta.width,meta.height,p.colors||colors,p.bpc,p.predictor);
+      if(!data)return {sprite:null,reason:'This image predictor is not supported.'};
+      const rowBytes=Math.ceil(meta.width*colors*p.bpc/8), need=rowBytes*meta.height;
+      if(data.length<need)return {sprite:null,reason:'The figure data is incomplete or packed unusually.'};
+      const sprite=spriteFromPixels(data,meta.width,meta.height,colors,p.bpc,p.decode);
+      return sprite?{sprite,reason:''}:{sprite:null,reason:'This figure is too detailed for a compact glasses bitmap.'};
+    }
+    function inferFigureNotes(text, count) {
+      const lines = String(text || '').replace(/\r/g,'').split(/\n+/).map(s => s.trim()).filter(Boolean);
+      const notes = [], seen = new Set();
+      const re = /(^|\b)(figure|fig\.?|diagram|chart|table|image|photo|illustration|schematic|graph)\b/i;
+      for (const line of lines) {
+        if (!re.test(line)) continue;
+        const cleaned = line.replace(/\s+/g,' ');
+        const short = cleaned.length > 120 ? cleaned.slice(0,117) + '…' : cleaned;
+        const key = short.toLowerCase();
+        if (!seen.has(key)) { notes.push(short); seen.add(key); }
+        if (notes.length >= 3) break;
+      }
+      if (!notes.length && count > 0) notes.push(count === 1 ? 'Image or diagram present on this PDF page.' : 'Visual content is present on this PDF page.');
+      return notes;
+    }
+
+    function pageOrder() {
+      let catalog=null; for(const [n,o] of objects){ if(resolvedPdfName(o.body,'Type',objects)==='Catalog'){catalog=n;break;} }
+      const seen=new Set(), out=[];
+      function refsFromArrayBody(body,depth) {
+        if((depth||0)>12) return [];
+        const src=String(body||'').trim();
+        if(src.startsWith('[')) {
+          const arr=findBalanced(src,0,'[',']')||src;
+          return Array.from(arr.matchAll(/(\d+)\s+\d+\s+R/g)).map(m=>Number(m[1]));
+        }
+        const ref=/^(\d+)\s+\d+\s+R\b/.exec(src);
+        if(ref) { const obj=objects.get(Number(ref[1])); return obj?refsFromArrayBody(obj.body,(depth||0)+1):[]; }
+        return [];
+      }
+      function kidsRefs(body) { return refsFromArrayBody(pdfDictValue(body,'Kids'),0); }
+      function walk(n){
+        if(seen.has(n))return; seen.add(n);
+        const o=objects.get(n); if(!o)return;
+        if(resolvedPdfName(o.body,'Type',objects)==='Page'){out.push(n);return;}
+        for(const child of kidsRefs(o.body)) walk(child);
+      }
+      if(catalog){ const pagesValue=pdfDictValue(objects.get(catalog).body,'Pages'), m=/^(\d+)\s+\d+\s+R\b/.exec(pagesValue); if(m)walk(Number(m[1])); }
+      if(!out.length) for(const [n,o] of objects)if(resolvedPdfName(o.body,'Type',objects)==='Page')out.push(n);
+      return out;
+    }
+    function contentRefs(pageNum) {
+      const page=objects.get(pageNum); if(!page)return[];
+      const refs=[], seen=new Set();
+      function addRef(num,depth) {
+        if((depth||0)>12||seen.has(num)) return;
+        seen.add(num);
+        const o=objects.get(num); if(!o) return;
+        if(streamTokenInfo(o.body)) { refs.push(num); return; }
+        const body=o.body.trim(), nested=Array.from(body.matchAll(/(\d+)\s+\d+\s+R/g)).map(m=>Number(m[1]));
+        for(const child of nested) addRef(child,(depth||0)+1);
+      }
+      const value=pdfDictValue(page.body,'Contents'); if(!value)return refs;
+      if(value.startsWith('[')) { for(const m of value.matchAll(/(\d+)\s+\d+\s+R/g)) addRef(Number(m[1]),0); return refs; }
+      const one=/^(\d+)\s+\d+\s+R\b/.exec(value); if(one)addRef(Number(one[1]),0);
+      return refs;
+    }
+
+
+
+    const order=pageOrder(); if(!order.length)throw new Error('No PDF pages were found.');
+    const pages=[], figurePages=[];
+    for(let i=0;i<order.length;i++) {
+      if(onProgress)onProgress('extracting page '+(i+1)+' of '+order.length+'…');
+      const refs=contentRefs(order[i]); let text='';
+      for(const r of refs){ const t=await contentText(r,order[i],0); if(t)text+=(text?'\n':'')+t; }
+      text = text.trim();
+      let figureCount = 0, maxArea = 0, images=[], vectorDetected=false, inlineDetected=false;
+      for(const r of refs) {
+        const scan = await figureScan(r,order[i],0,new Set());
+        figureCount += scan.count;
+        maxArea = Math.max(maxArea, scan.maxArea);
+        images=images.concat(scan.images||[]);
+        vectorDetected=vectorDetected||!!scan.vectorDetected;
+        inlineDetected=inlineDetected||!!scan.inlineDetected;
+      }
+      images.sort((a,b)=>(b.width*b.height)-(a.width*a.height));
+      let sprite=null,fallbackReason='';
+      for(const image of images){const rendered=await renderImageSprite(image);if(rendered.sprite){sprite=rendered.sprite;break;}if(!fallbackReason)fallbackReason=rendered.reason;}
+      const visualCount=figureCount>0?figureCount:(vectorDetected?1:0);
+      if(!sprite&&inlineDetected&&!fallbackReason)fallbackReason='Inline PDF image detected. Use the phone for full detail.';
+      if(!sprite&&vectorDetected&&!fallbackReason)fallbackReason='Vector diagram detected. Use the phone for full detail.';
+      pages.push(text);
+      figurePages.push({ count:visualCount, notes:inferFigureNotes(text, visualCount), maxArea:maxArea, sprite:sprite, fallbackReason:fallbackReason, vectorDetected:vectorDetected, inlineDetected:inlineDetected });
+    }
+    return { pages, figurePages };
+  }
+
+  init();
+})();
+</script>
+
+<script type="mira-app">
+(function () {
+  'use strict';
+  const INK=15, MID=8, CACHE_REFILL_MARGIN=8;
+  let view=null, chrome=true, waiting=true, mode='text', figureCard=null;
+  let cache={revision:'',docId:'',title:'',pageCount:0,mode:'normal',total:0,start:0,screens:[],full:false};
+  let currentIndex=0, lastRefillAt=-9999;
+  let off=null;
+
+  miraCanvas.createPage({width:640,height:480});
+
+  function safe(value,limit) {
+    let s=value==null?'':String(value); return s.length>limit?s.slice(0,Math.max(0,limit-1))+'…':s;
+  }
+  function buildWaiting() {
+    return [
+      {key:'mpr:wait',shape:{kind:'rect',x:0,y:0,w:0,h:0,stroke:0,strokeWidth:0,children:{
+        waitTitle:{kind:'text',x:40,y:92,w:560,h:40,text:'MIRA PDF READER',align:'center',fontSize:32,fill:INK},
+        waitSub:{kind:'text',x:52,y:160,w:536,h:64,padding:4,text:'Choose a stored PDF on the phone.\nThe first reading screen will appear here.',align:'center',fontSize:18,lineSpacing:28,fill:MID},
+        waitHint:{kind:'text',x:60,y:282,w:520,h:32,text:'Swipe to scroll once a document is open',align:'center',fontSize:18,fill:MID}
+      }}}
+    ];
+  }
+  function buildReader() {
+    const trees=[];
+    if(chrome) {
+      trees.push({key:'mpr:chrome',shape:{kind:'rect',x:0,y:0,w:0,h:0,stroke:0,strokeWidth:0,children:{
+        chromeTitle:{kind:'text',x:34,y:22,w:420,h:32,text:safe(view.title,22),fontSize:24,fill:INK},
+        chromePage:{kind:'text',x:470,y:26,w:136,h:28,text:view.page+'/'+view.pageCount,align:'right',fontSize:18,fill:MID},
+        chromeRule:{kind:'line',x1:34,y1:66,x2:606,y2:66,stroke:MID,strokeWidth:1}
+      }}});
+    }
+    const isLarge=view.mode==='large', fs=isLarge?24:18, step=isLarge?40:32, startY=chrome?76:44;
+    const children={};
+    for(let i=0;i<view.lines.length;i++) {
+      children['textLine'+i]={kind:'text',x:38,y:startY+i*step,w:564,h:isLarge?36:28,text:safe(view.lines[i],isLarge?28:36),fontSize:fs,fill:INK};
+    }
+    trees.push({key:'mpr:text',shape:{kind:'rect',x:0,y:0,w:0,h:0,stroke:0,strokeWidth:0,children}});
+    if(chrome) {
+      const footerText = view.figureCount > 0 ? 'Screen ' + view.chunk + '/' + view.chunkCount + ' · visuals on this page' : 'Screen ' + view.chunk + '/' + view.chunkCount + ' · swipe · tap controls';
+      trees.push({key:'mpr:footer',shape:{kind:'rect',x:0,y:0,w:0,h:0,stroke:0,strokeWidth:0,children:{
+        footerProgress:{kind:'text',x:38,y:366,w:564,h:28,text:footerText,align:'center',fontSize:18,fill:MID}
+      }}});
+    }
+    return trees;
+  }
+  function wrapFigureNotes(value) {
+    const words=String(value||'').replace(/\s+/g,' ').trim().split(' ').filter(Boolean), lines=[];
+    let line='';
+    for(let word of words) {
+      while(word.length>44) {
+        if(line){lines.push(line);line='';if(lines.length>=3)return lines.join('\n');}
+        lines.push(word.slice(0,43)+'…'); word=word.slice(43); if(lines.length>=3)return lines.join('\n');
+      }
+      if(!line)line=word;
+      else if((line+' '+word).length<=44)line+=' '+word;
+      else {lines.push(line);line=word;if(lines.length>=3)return lines.join('\n');}
+    }
+    if(line&&lines.length<3)lines.push(line);
+    return lines.slice(0,3).join('\n');
+  }
+
+  function buildFigureCard() {
+    const notes = (figureCard && Array.isArray(figureCard.figureNotes) ? figureCard.figureNotes : []).slice(0,3);
+    const joined = wrapFigureNotes(notes.length ? notes.join(' ') : 'Visual content is present on this PDF page.');
+    const sprite=figureCard&&figureCard.sprite;
+    if(sprite&&Array.isArray(sprite.runs)&&sprite.w>0&&sprite.h>0) {
+      // Keep the figure as ONE live Mira primitive.  The compressed phone-side
+      // run list is expanded here into a native bitmap so we never create one
+      // rectangle per run (which could exceed Mira's 512-live-primitive budget).
+      // Pixel 15 is transparent for sprites; 14 is the brightest drawable green.
+      const scale=Math.max(1,Math.min(2,Math.floor(430/sprite.w),Math.floor(240/sprite.h)));
+      const drawW=sprite.w*scale, drawH=sprite.h*scale;
+      const pixels=new Array(drawW*drawH).fill(15);
+      for(let i=0;i<sprite.runs.length;i++) {
+        const r=sprite.runs[i], y=r[0]|0, x0=r[1]|0, len=r[2]|0;
+        if(y<0||y>=sprite.h||len<1) continue;
+        const from=Math.max(0,x0), to=Math.min(sprite.w,x0+len);
+        for(let sy=0;sy<scale;sy++) {
+          const row=(y*scale+sy)*drawW;
+          for(let x=from;x<to;x++) {
+            const dx=x*scale;
+            for(let sx=0;sx<scale;sx++) pixels[row+dx+sx]=14;
+          }
+        }
+      }
+      const ox=Math.round((640-drawW)/2), oy=94;
+      return [
+        {key:'mpr:figChrome',shape:{kind:'rect',x:0,y:0,w:0,h:0,stroke:0,strokeWidth:0,children:{
+          figTitle:{kind:'text',x:34,y:22,w:420,h:32,text:safe(figureCard.title,22),fontSize:24,fill:INK},
+          figPage:{kind:'text',x:454,y:26,w:152,h:28,text:'Page '+figureCard.page,align:'right',fontSize:18,fill:MID},
+          figRule:{kind:'line',x1:34,y1:66,x2:606,y2:66,stroke:MID,strokeWidth:1}
+        }}},
+        {key:'mpr:sprite',shape:{kind:'sprite',x:ox,y:oy,bitmap:{w:drawW,h:drawH,pixels:pixels}}},
+        {key:'mpr:figFooter',shape:{kind:'rect',x:0,y:0,w:0,h:0,stroke:0,strokeWidth:0,children:{
+          spriteLabel:{kind:'text',x:48,y:370,w:544,h:26,text:'Compact figure · tap: text · swipe: page',align:'center',fontSize:18,fill:MID}
+        }}}
+      ];
+    }
+    return [
+      {key:'mpr:figChrome',shape:{kind:'rect',x:0,y:0,w:0,h:0,stroke:0,strokeWidth:0,children:{
+        figTitle:{kind:'text',x:34,y:22,w:420,h:32,text:safe(figureCard.title,22),fontSize:24,fill:INK},
+        figPage:{kind:'text',x:454,y:26,w:152,h:28,text:'Page ' + figureCard.page,align:'right',fontSize:18,fill:MID},
+        figRule:{kind:'line',x1:34,y1:66,x2:606,y2:66,stroke:MID,strokeWidth:1}
+      }}},
+      {key:'mpr:figBody',shape:{kind:'rect',x:146,y:92,w:348,h:146,cornerRadius:12,stroke:INK,strokeWidth:2,children:{
+        figBodyTitle:{kind:'text',x:170,y:116,w:300,h:32,text:'VISUAL CONTENT',align:'center',fontSize:24,fill:INK},
+        figBodyCount:{kind:'text',x:170,y:156,w:300,h:26,text:String(figureCard.figureCount || 1) + ((figureCard.figureCount || 1) === 1 ? ' figure on this page' : ' visuals on this page'),align:'center',fontSize:18,fill:MID},
+        figBodyHint:{kind:'text',x:170,y:190,w:300,h:26,text:'Unsupported detail · use phone',align:'center',fontSize:18,fill:MID}
+      }}},
+      {key:'mpr:figNotes',shape:{kind:'rect',x:0,y:0,w:0,h:0,stroke:0,strokeWidth:0,children:{
+        figNotesText:{kind:'text',x:72,y:270,w:496,h:88,padding:4,text:joined,align:'center',fontSize:18,lineSpacing:28,fill:INK},
+        figFooter:{kind:'text',x:48,y:370,w:544,h:26,text:'Tap: back to text · swipe: page · hold: back',align:'center',fontSize:18,fill:MID}
+      }}}
+    ];
+  }
+  function render() {
+    const trees=waiting?buildWaiting():(mode==='figure'&&figureCard?buildFigureCard():(view?buildReader():buildWaiting()));
+    for(let i=0;i<trees.length;i++)miraCanvas.draw(trees[i].key,trees[i].shape);
+  }
+  function cacheScreenAt(index) {
+    const local=index-cache.start;
+    return local>=0&&local<cache.screens.length?cache.screens[local]:null;
+  }
+  function viewFromCacheScreen(screen) {
+    if(!screen)return null;
+    return {title:cache.title,page:screen.page,pageCount:cache.pageCount,chunk:screen.chunk,chunkCount:screen.chunkCount,lines:screen.lines||[],mode:cache.mode,figureCount:Number(screen.figureCount)||0};
+  }
+  function localState() {
+    if(!cache.revision||!view)return null;
+    return {revision:cache.revision,docId:cache.docId,mode:cache.mode,index:currentIndex,page:view.page,chunk:view.chunk};
+  }
+  function sendCompanion(message) {
+    try { if(typeof miraCompanion!=='undefined')miraCompanion.sendToCompanion(message); } catch(e) {}
+  }
+  function sendPosition() {
+    const state=localState(); if(state)sendCompanion(Object.assign({type:'cache-position'},state));
+  }
+  function requestRefill(direction,force) {
+    if(cache.full||!cache.revision)return;
+    const travel=Number(direction)<0?-1:1;
+    // Prefetch only in the direction the reader is moving. The opposite cache
+    // edge may legitimately sit at document start/end and must not cause an
+    // immediate response -> request -> response loop.
+    if((travel<0&&currentIndex<=0)||(travel>0&&currentIndex>=cache.total-1))return;
+    const left=currentIndex-cache.start, right=(cache.start+cache.screens.length-1)-currentIndex;
+    const remaining=travel<0?left:right;
+    if(!force&&remaining>CACHE_REFILL_MARGIN)return;
+    if(!force&&Math.abs(currentIndex-lastRefillAt)<4)return;
+    lastRefillAt=currentIndex;
+    const state=localState(); if(state)sendCompanion(Object.assign({type:'cache-refill',direction:travel},state));
+  }
+  function localNavigate(delta) {
+    const step=delta>0?1:-1;
+    if(!cache.revision) { sendCompanion({type:'navigate',delta:step}); return; }
+    const target=Math.max(0,Math.min(cache.total-1,currentIndex+step));
+    if(target===currentIndex)return;
+    const screen=cacheScreenAt(target);
+    if(screen) {
+      currentIndex=target; view=viewFromCacheScreen(screen); waiting=false; mode='text'; figureCard=null; chrome=true; render();
+      sendPosition(); requestRefill(step,false); return;
+    }
+    requestRefill(step,true);
+    // If no cache has ever loaded, retain the V11 navigation fallback.
+    if(!cache.revision)sendCompanion({type:'navigate',delta:step});
+  }
+
+  if(typeof miraCompanion!=='undefined') {
+    off=miraCompanion.onFromCompanion(function(message){
+      if(!message)return;
+      if(message.type==='companion-ready') { sendCompanion({type:'ready',local:localState()}); }
+      else if(message.type==='cache-bundle'&&Array.isArray(message.screens)) {
+        const same=cache.revision&&cache.revision===message.revision;
+        const forcePosition=!!message.forcePosition;
+        // A same-revision background refill may arrive after the reader has
+        // reversed direction. If its incoming window no longer contains the
+        // current screen, discard it before replacing the existing cache.
+        if(same&&!forcePosition) {
+          const incomingStart=Number(message.startIndex)||0;
+          if(currentIndex<incomingStart||currentIndex>=incomingStart+message.screens.length)return;
+        }
+        const previousIndex=currentIndex;
+        cache={revision:String(message.revision||''),docId:String(message.docId||''),title:String(message.title||''),pageCount:Number(message.pageCount)||0,mode:message.mode==='large'?'large':'normal',total:Number(message.totalScreens)||message.screens.length,start:Number(message.startIndex)||0,screens:message.screens,full:!!message.full};
+        let desired=(same&&!forcePosition)?previousIndex:(Number(message.centerIndex)||0);
+        if(!cacheScreenAt(desired))desired=Number(message.centerIndex)||cache.start;
+        currentIndex=Math.max(0,Math.min(cache.total-1,desired));
+        const screen=cacheScreenAt(currentIndex);
+        if(screen) {
+          const nextView=viewFromCacheScreen(screen);
+          lastRefillAt=-9999;
+          if(forcePosition) {
+            // Deliberate phone actions (open, jump/search, size change, reconnect)
+            // may move the visible glasses reader to this screen. Bundle receipt
+            // itself never triggers another refill; navigation owns prefetching.
+            view=nextView; waiting=false; mode='text'; figureCard=null; chrome=true;
+            render();
+          } else {
+            // Rolling-window refills are background maintenance only. Refresh
+            // the underlying text state, but never dismiss a figure or reopen
+            // a document after the user long-pressed back to the waiting screen.
+            // Do not request another bundle merely because this one arrived.
+            view=nextView;
+            if(!waiting&&mode==='text')render();
+          }
+        }
+      }
+      else if(message.type==='view') { view=message; waiting=false; chrome=true; mode='text'; render(); }
+      else if(message.type==='figure') { figureCard=message; waiting=false; mode='figure'; render(); }
+      else if(message.type==='no-document') { view=null; figureCard=null; cache={revision:'',docId:'',title:'',pageCount:0,mode:'normal',total:0,start:0,screens:[],full:false}; currentIndex=0; waiting=true; chrome=true; mode='text'; render(); }
+    });
+    sendCompanion({type:'ready',local:localState()});
+  }
+
+  render();
+  miraCanvas.onInput(function(event){
+    if(event.type==='scrollBottom'&&!waiting) localNavigate(1);
+    else if(event.type==='scrollTop'&&!waiting) localNavigate(-1);
+    else if(event.type==='click'&&!waiting){ if(mode==='figure'){ mode='text'; render(); } else { chrome=!chrome; render(); } }
+    else if(event.type==='longClick'&&!waiting){ waiting=true; figureCard=null; chrome=true; mode='text'; render(); sendCompanion({type:'closed-document'}); }
+    else if(event.type==='clear') render();
+  });
+  miraCanvas.onStop(function(){ const state=localState(); if(off)off(); sendCompanion({type:'stop',local:state}); });
+})();
+</script>
+</body>
+</html>

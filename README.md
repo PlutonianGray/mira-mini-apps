@@ -231,4 +231,4 @@ Future Mira firmware, app, SDK, or runtime changes may require an app to be upda
 
 ## Development
 
-These apps were created with ChatGPT and reviewed against the public Mira mini\-app / WASM API\. They are independent community projects and are not official Mira software\.
+These apps are produced by Kevin Tieman, created by ChatGPT, and verified by Grok. They were subsequently migrated from Mira’s retired JavaScript runtime to Rust/WebAssembly for the current Mira SDK. ChatGPT assisted with migration planning, specification, and review; Grok was used for Rust compilation, WASM packaging, and validation. And they were reviewed against the public Mira mini\-app / WASM API\. They are independent community projects and are not official Mira software\.

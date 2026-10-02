@@ -163,15 +163,69 @@ Glasses controls:
 - Hold on a Foundation to undo
 - Hold while a picker or card selection is active to cancel it
 
+### Alpine Ziggy 1
+
+A classic third\-person downhill skiing game for Mira glasses, using head yaw to steer the skier through slalom gates while avoiding trees and rocks\.
+
+Features include:
+
+- Head\-yaw steering with a 20° default range, adjustable from 12–30°
+- Optional left/right steering inversion
+- Slalom gates worth 100 points each
+- Trees and rocks that end the run on collision
+- Gradually increasing speed and difficulty
+- Narrowing gates as the run progresses
+- Persistent best score retained between app restarts
+- Sensor\-wait behavior that freezes the run if head tracking becomes unavailable
+- Retro 640×480 vector presentation with snow, gates, obstacles, skier, score, speed, and best\-score display
+- Phone companion controls for steering range, inversion, recentering, start/restart, status, and built\-in test results
+
+Glasses controls:
+
+- Turn your head left or right to steer
+- Tap to start or restart a run
+- Long\-press to recenter head steering
+
+### Ziggy I, II, and III
+
+A combined Mira text\-adventure app containing Ziggy I, Ziggy II, and Ziggy III, with the full adventure interpreter and story state maintained on the phone and a glasses\-optimized reading, paging, dictation, and command interface\.
+
+Features include:
+
+- Three adventures in one app with a glasses game chooser
+- Full phone transcript and typed\-command entry
+- Glasses output wrapped for the 640×480 display with multi\-page navigation
+- Tap\-to\-dictate command entry with confirmation before a dictated command is sent
+- Quick commands including LOOK, INVENTORY, SCORE, SAVE, RESTORE, UNDO, SAVE SLOT, SWITCH GAME, and CANCEL
+- Automatic per\-turn autosave
+- Three manual save slots per adventure
+- One\-turn Undo
+- Parser continuation handling for clarification questions
+- Recovery handling if an adventure session cannot be reconstructed cleanly
+- Separate progress and saves for Ziggy I, Ziggy II, and Ziggy III
+- Phone\-side attribution and license information for the included adventure materials
+
+Glasses controls:
+
+- In the game chooser, swipe to select an adventure and tap to open it
+- During play, swipe to move through output pages
+- Tap to dictate a command
+- Long\-press to open quick commands
+- When confirming dictated text, tap to send, swipe to retry, or hold to cancel
+
 ## Testing Status
 
-**Lunar Descent, Fleet Grid, Minesweeper, and Sudoku have been tested and verified directly on physical Mira glasses\. SoliMira has been tested successfully using Mira’s hardware\-backed Glasses Preview while running on physical Mira glasses\.**
+**Lunar Descent, Fleet Grid, Minesweeper, and Sudoku have been tested and verified directly on physical Mira glasses\. SoliMira and Alpine Ziggy 1 have been tested using Mira’s hardware\-backed Glasses Preview while the apps were running on physical Mira glasses\. Ziggy I, II, and III has not yet had a completed hardware\-backed preview or direct optical\-display verification recorded here\.**
 
 - **Lunar Descent** — confirmed working with the Mira glasses and companion\-app software current at the time of testing in **September 2026**
 - **Fleet Grid** — confirmed working with the Mira glasses and companion\-app software current at the time of testing in **September 2026**
 - **Minesweeper** — confirmed working directly on physical Mira glasses with the Mira glasses and companion\-app software current at the time of testing in **September 2026**
 - **Sudoku** — confirmed working directly on physical Mira glasses with the Mira glasses and companion\-app software current at the time of testing in **September 2026**
 - **SoliMira** — tested successfully using Mira’s hardware\-backed **Glasses Preview**, with the app running on physical Mira glasses and controlled through the glasses\. Direct optical\-display verification is pending because of a separate glasses display issue\.
+- **Alpine Ziggy 1** — confirmed running using Mira’s hardware\-backed **Glasses Preview** with the WASM app executing on physical Mira glasses\. The preview itself refreshed at a visibly reduced frame rate, so smoothness of the direct optical display remains unverified pending repair of the separate glasses display issue\.
+- **Ziggy I, II, and III** — included as the combined three\-adventure app\. Final hardware\-backed Glasses Preview and direct optical\-display verification have not yet been recorded\.
+
+Mira’s connected\-device Glasses Preview mirrors the retained vector output of the WASM app running on the glasses\. Its phone\-side refresh rate should not be treated as proof of the direct optical display’s frame rate\.
 
 Future Mira firmware, app, SDK, or runtime changes may require an app to be updated or rebuilt\.
 

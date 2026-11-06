@@ -186,6 +186,36 @@ Glasses controls:
 - Tap to start or restart a run
 - Long\-press to recenter head steering
 
+### ZiggyBalance
+
+A book\-balancing game for Mira glasses inspired by the classic challenge of walking with a book on your head\. Tilt your head gently to keep a virtual hardcover book from sliding off, with a phone companion for game settings and live statistics\.
+
+Features include:
+
+- Glasses\-friendly 640×480 grayscale game display with an animated book, stylized head, and top\-view balance indicator
+- Head pitch and roll control for forward/backward, left/right, and diagonal book movement
+- Stable head\-position calibration before each challenge
+- Simulated sliding physics with friction, inertia, recoverable near\-falls, and book\-drop animations
+- Seated, Standing, and Walking practice modes
+- Easy, Normal, and Hard difficulty levels
+- Selectable 30\-second, 1\-minute, and 3\-minute sessions
+- Walking mode with a 1\.5× score multiplier and extra tolerance for natural head movement
+- Score, book\-drop count, balanced\-time percentage, and longest uninterrupted streak
+- Left/right and forward/back steadiness scores based on virtual\-book slippage and sliding speed in the latest scoring revision
+- Automatic replacement of the book after a drop, without restarting the session
+- Phone companion for starting, pausing, resuming, restarting, recalibrating, selecting settings, and checking game statistics
+- Optional left/right sensor\-direction inversion and diagnostic readouts
+
+Glasses controls:
+
+- Hold your head comfortably level during calibration
+- Gently tilt or correct your head position to keep the virtual book balanced
+- On the setup screen, swipe to select the practice mode, difficulty, session length, Start, or Recalibrate
+- Tap to change the selected setup option or begin the challenge
+- Tap during a session to pause
+- Tap while paused to resume after a countdown
+- Tap after the results screen to return to calibration for another challenge
+
 ### Ziggy I, II, and III
 
 A combined Mira text\-adventure app containing Ziggy I, Ziggy II, and Ziggy III, with the full adventure interpreter and story state maintained on the phone and a glasses\-optimized reading, paging, dictation, and command interface\.
@@ -215,7 +245,7 @@ Glasses controls:
 
 ## Testing Status
 
-**Lunar Descent, Fleet Grid, Minesweeper, and Sudoku have been tested and verified directly on physical Mira glasses\. SoliMira and Alpine Ziggy 1 have been tested using Mira’s hardware\-backed Glasses Preview while the apps were running on physical Mira glasses\. Ziggy I, II, and III has not yet had a completed hardware\-backed preview or direct optical\-display verification recorded here\.**
+**Lunar Descent, Fleet Grid, Minesweeper, and Sudoku have been tested and verified directly on physical Mira glasses\. Earlier ZiggyBalance builds have also been tested directly on physical Mira glasses, although the latest slippage\-scoring revision has not yet been independently verified here\. SoliMira and Alpine Ziggy 1 have been tested using Mira’s hardware\-backed Glasses Preview while the apps were running on physical Mira glasses\. Ziggy I, II, and III has not yet had a completed hardware\-backed preview or direct optical\-display verification recorded here\.**
 
 - **Lunar Descent** — confirmed working with the Mira glasses and companion\-app software current at the time of testing in **September 2026**
 - **Fleet Grid** — confirmed working with the Mira glasses and companion\-app software current at the time of testing in **September 2026**
@@ -223,6 +253,7 @@ Glasses controls:
 - **Sudoku** — confirmed working directly on physical Mira glasses with the Mira glasses and companion\-app software current at the time of testing in **September 2026**
 - **SoliMira** — tested successfully using Mira’s hardware\-backed **Glasses Preview**, with the app running on physical Mira glasses and controlled through the glasses\. Direct optical\-display verification is pending because of a separate glasses display issue\.
 - **Alpine Ziggy 1** — confirmed running using Mira’s hardware\-backed **Glasses Preview** with the WASM app executing on physical Mira glasses\. The preview itself refreshed at a visibly reduced frame rate, so smoothness of the direct optical display remains unverified pending repair of the separate glasses display issue\.
+- **ZiggyBalance** — earlier versions exercised directly on physical Mira glasses in **November 2026**, including book movement, difficulty tuning, and on\-screen layout\. The latest revision adding separate left/right and forward/back steadiness scoring has not yet been independently verified here on physical glasses\.
 - **Ziggy I, II, and III** — included as the combined three\-adventure app\. Final hardware\-backed Glasses Preview and direct optical\-display verification have not yet been recorded\.
 
 Mira’s connected\-device Glasses Preview mirrors the retained vector output of the WASM app running on the glasses\. Its phone\-side refresh rate should not be treated as proof of the direct optical display’s frame rate\.
@@ -231,4 +262,4 @@ Future Mira firmware, app, SDK, or runtime changes may require an app to be upda
 
 ## Development
 
-These apps are produced by Kevin Tieman, created by ChatGPT, and verified by Grok. They were subsequently migrated from Mira’s retired JavaScript runtime to Rust/WebAssembly for the current Mira SDK. ChatGPT assisted with migration planning, specification, and review; Grok was used for Rust compilation, WASM packaging, and validation. And they were reviewed against the public Mira mini\-app / WASM API\. They are independent community projects and are not official Mira software\.
+These apps are produced by Kevin Tieman, created by ChatGPT, and verified by Grok\. Several earlier apps were subsequently migrated from Mira’s retired JavaScript runtime to Rust/WebAssembly for the current Mira SDK, while ZiggyBalance was developed directly for Rust/WebAssembly\. ChatGPT assisted with migration planning, specification, and review; Grok was used for Rust compilation, WASM packaging, and validation\. And they were reviewed against the public Mira mini\-app / WASM API\. They are independent community projects and are not official Mira software\.

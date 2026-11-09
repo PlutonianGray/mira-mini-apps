@@ -1,0 +1,948 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<script type="application/mira-manifest+json">
+{"title":"Ziggy Calendar","description":"Read-only live iCloud CalDAV + Demo/QA for Mira glasses. Live writes CLOSED.","phoneIcon":"calendar"}
+</script>
+<style>
+body{margin:0;padding:18px;font:15px system-ui;color:#173c20;background:#f3faf4}
+main{max-width:780px;margin:0 auto}
+h1{margin:0 0 5px;font-size:24px}
+.panel{margin-top:12px;padding:12px;border:1px solid #c5dfc7;border-radius:11px;background:#fff}
+label{display:block;margin:10px 0 5px;font-weight:650}
+input,select,button{box-sizing:border-box;width:100%;min-height:42px;padding:9px 10px;border-radius:9px;border:1px solid #bdd8c0;background:#fff;color:#173c20;font:inherit}
+button{border:0;background:#1c7133;color:#fff;font-weight:700}
+button.secondary{background:#566f5b}
+button:disabled{opacity:.45}
+.small{font-size:13px;color:#66846b}
+.warn{color:#8a5b18;font-weight:650}
+.safe{color:#27623a;font-weight:650}
+#diag{max-height:160px;overflow:auto;font-family:monospace;white-space:pre-wrap}
+</style>
+</head>
+<body>
+<main id="mira-companion-root">
+<h1>Ziggy Calendar</h1>
+<p>WASM port with real read-only iCloud CalDAV. Live writes CLOSED. Scheduling side-effects CLOSED. Demo data is isolated.</p>
+<div class="panel">
+<label for="mode">Calendar source</label>
+<select id="mode">
+<option value="live" selected>Live iCloud — read-only</option>
+<option value="mock">Demo / QA data — never iCloud</option>
+</select>
+<div id="liveFields">
+<label for="account">Apple Account</label>
+<input id="account" type="text" autocomplete="username" placeholder="name@example.com">
+<label for="appPassword">App-specific password</label>
+<input id="appPassword" type="password" autocomplete="current-password" placeholder="xxxx-xxxx-xxxx-xxxx">
+<button id="connect">Connect / Refresh iCloud</button><button id="disconnect" class="secondary" style="margin-top:8px">Disconnect</button>
+<div class="small">Password is kept only in transient phone memory for this running session. It is never stored, never sent to glasses, and is erased on Disconnect, mode switch to Demo, or app stop. Account email may be remembered. iOS Password AutoFill is enabled.</div>
+<p class="small" style="margin:10px 0 0"><a id="helpLink" href="#ziggy-help" style="color:#1c7133;font-weight:650">How to Set Up & Use Ziggy Calendar</a></p>
+</div>
+<div id="demoFields" style="display:none">
+<label for="mockScenario">Demo dataset</label>
+<select id="mockScenario">
+<option value="standard">Standard demo calendar</option>
+<option value="empty">Empty-day demo</option>
+<option value="many">Busy-calendar demo</option>
+<option value="phase5">Recurrence fixtures</option>
+</select>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px">
+<button id="refresh">Refresh</button>
+<button id="showNext" class="secondary">Show NEXT</button>
+</div>
+</div>
+<div class="panel">
+<div id="gateState" class="warn">Live write gate: CLOSED · scheduling side-effect gate: CLOSED</div>
+<div id="status" style="margin-top:10px">Waiting for glasses app.</div>
+<div id="summary" class="small" style="margin-top:8px"></div>
+</div>
+<details class="panel">
+<summary>Sanitized diagnostics</summary>
+<div id="diag" class="small">No diagnostics yet.</div>
+</details>
+<details class="panel" id="ziggy-help">
+<summary>How to Set Up & Use Ziggy Calendar</summary>
+<h2 style="font-size:16px;margin:12px 0 6px">Connecting to iCloud</h2>
+<p>Ziggy Calendar does not use your normal Apple Account password. It needs an Apple app-specific password.</p>
+<ol>
+<li>Go to <a href="https://account.apple.com/" target="_blank" rel="noopener">account.apple.com</a>.</li>
+<li>Sign in to your Apple Account.</li>
+<li>Open Sign-In and Security.</li>
+<li>Select App-Specific Passwords.</li>
+<li>Choose Generate an app-specific password.</li>
+<li>Name it something like Ziggy Calendar.</li>
+<li>Copy the generated password and enter it in the App-specific password field above.</li>
+</ol>
+<p>You normally only need to generate this app-specific password once. Ziggy Calendar deliberately does not store it, so you enter the same password again when you start a new session. You do not need to go back to Apple and generate a new one each time. The password stays usable until Apple invalidates it or you revoke it. Changing your main Apple Account password may require a new app-specific password.</p>
+<h2 style="font-size:16px;margin:14px 0 6px">Privacy & Security</h2>
+<p>Ziggy Calendar is read-only. It cannot create, edit, or delete events, and it cannot accept or decline invitations. It does not send scheduling changes to iCloud. The app-specific password exists only in transient phone memory during the session. It is never sent to the glasses and is not saved. Your Apple Account email may be remembered for convenience.</p>
+<h2 style="font-size:16px;margin:14px 0 6px">Using Ziggy Calendar</h2>
+<p>Swipe to move between items, dates, weeks, or months. Tap to open or select. Hold to go back one level.</p>
+<p><b>NEXT</b> shows the next upcoming events. <b>TODAY</b> shows today. <b>TOMORROW</b> shows tomorrow. <b>UPCOMING</b> shows events across future dates.</p>
+<p><b>WEEK</b> shows seven days. Timed appointments sit vertically by approximate time of day, with major time markers. <b>MONTH</b> shows a traditional month. Drill from month to week row to date to day with Tap and Swipe.</p>
+<p><b>DAY</b> shows the events for the selected date. Tap an event to open details. <b>DETAILS</b> shows the title, date, time, all-day status when it applies, calendar, location, and notes. Swipe to move through longer notes. Hold to go back.</p>
+</details>
+</main>
+<script>
+(function(){
+  'use strict';
+  var ROOT = 'https://caldav.icloud.com/';
+  var modeEl=document.getElementById('mode');
+  var liveFields=document.getElementById('liveFields');
+  var demoFields=document.getElementById('demoFields');
+  var statusEl=document.getElementById('status');
+  var summaryEl=document.getElementById('summary');
+  var diagEl=document.getElementById('diag');
+  var gateEl=document.getElementById('gateState');
+  var connectBtn=document.getElementById('connect');
+  var connected=true;
+  var mode='live';
+  var mockScenario='standard';
+  var preferences={defaultView:'next',timeFormat:'12',upcomingCount:6,showLocation:true,showCanceled:false,showDeclined:false,page:0,pageCount:1};
+  var monthAnchor=null;
+  var weekAnchor=null;
+  var loadedRange=null;
+  var knownCals=[];
+  var revSnapshots=[];
+  var lastRevision=0;
+  var nextToken=1;
+  var MAX_NOTE_CHARS=8000;
+  var NOTE_LINES_PER_PAGE=3;
+  var MAX_NOTE_PAGES=108;
+  var liveState={status:'IDLE',calendars:[],events:[],revision:0,error:''};
+  var transientCreds=null; // {account, password, auth} — discarded on stop/teardown
+  var requestGen=0;
+  var diagnostics=[];
+
+  function addDiag(msg){
+    diagnostics.push(String(msg||'').slice(0,240));
+    if(diagnostics.length>12) diagnostics.shift();
+    diagEl.textContent=diagnostics.join('\n');
+  }
+  function redact(s){
+    s=String(s||'');
+    s=s.replace(/Authorization\s*:\s*[^\r\n]+/gi,'Authorization: [redacted]');
+    s=s.replace(/Basic\s+[A-Za-z0-9+/=]+/g,'Basic [redacted]');
+    if(transientCreds&&transientCreds.password) s=s.split(transientCreds.password).join('[redacted]');
+    return s;
+  }
+  function setStatus(text, summary){
+    statusEl.textContent=text||'';
+    summaryEl.textContent=summary||'';
+  }
+  function syncModeUi(){
+    liveFields.style.display=mode==='live'?'block':'none';
+    demoFields.style.display=mode==='mock'?'block':'none';
+  }
+  function send(msg){ if(connected && window.miraCompanion) miraCompanion.sendToApp(msg); }
+
+  function isTrustedICloud(url){
+    try{
+      var u=new URL(url);
+      if(u.protocol!=='https:') return false;
+      if(u.port && u.port!=='443') return false;
+      var h=u.hostname.toLowerCase();
+      return h==='icloud.com' || h.endsWith('.icloud.com');
+    }catch(e){ return false; }
+  }
+  function ensureSlash(u){ return /\/$/.test(u)?u:u+'/'; }
+  function toIcalUtc(d){
+    var p=function(n){return String(n).padStart(2,'0');};
+    return d.getUTCFullYear()+p(d.getUTCMonth()+1)+p(d.getUTCDate())+'T'+p(d.getUTCHours())+p(d.getUTCMinutes())+p(d.getUTCSeconds())+'Z';
+  }
+  function basicAuth(account,password){
+    var raw=account+':'+password;
+    try{ return 'Basic '+btoa(unescape(encodeURIComponent(raw))); }catch(e){ return 'Basic '+btoa(raw); }
+  }
+  function davRequest(method,url,headers,body,gen){
+    if(!isTrustedICloud(url)) return Promise.reject(new Error('Refusing untrusted host'));
+    if(gen!==requestGen) return Promise.reject(new Error('Stale request'));
+    var opts={method:method,headers:headers||{}};
+    if(body!=null) opts.body=body;
+    return fetch(url,opts).then(function(res){
+      if(gen!==requestGen) throw new Error('Stale request');
+      var finalUrl=res.url||url;
+      if(!isTrustedICloud(finalUrl)) throw new Error('Redirect left trusted iCloud hosts');
+      return res.text().then(function(text){
+        if(text.length>800000) throw new Error('Response too large');
+        return {status:res.status,text:text,finalUrl:finalUrl,redirected:!!res.redirected};
+      });
+    });
+  }
+  function parseMultistatus(xml){
+    var out=[];
+    if(!xml||xml.indexOf('multistatus')<0) return out;
+    var blocks=xml.split(/<[^>]*response[^>]*>/i).slice(1);
+    blocks.forEach(function(block){
+      var href=(block.match(/<[^>]*href[^>]*>([^<]+)/i)||[])[1]||'';
+      var display=(block.match(/<[^>]*displayname[^>]*>([^<]+)/i)||[])[1]||'';
+      var isCal=/calendar/i.test(block) && /resourcetype/i.test(block);
+      var calData=(block.match(/<[^>]*calendar-data[^>]*>([\s\S]*?)<\/[^>]*calendar-data>/i)||[])[1]||'';
+      var etag=(block.match(/<[^>]*getetag[^>]*>([^<]+)/i)||[])[1]||'';
+      out.push({href:href.trim(),displayName:display.trim(),isCalendar:isCal,calendarData:calData,etag:etag});
+    });
+    return out;
+  }
+  function parseIcsDate(raw){
+    if(!raw) return null;
+    var m=String(raw).match(/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})?)?(Z)?/);
+    if(!m) return null;
+    var y=+m[1], mo=+m[2], d=+m[3], h=m[4]?+m[4]:0, mi=m[5]?+m[5]:0;
+    var utc=!!m[7];
+    var dt=utc?new Date(Date.UTC(y,mo-1,d,h,mi)):new Date(y,mo-1,d,h,mi);
+    return {date:dt, allDay:!m[4], utc:utc, y:y, mo:mo, d:d};
+  }
+  function formatWhen(dtstart, allDay, dtend){
+    var parsed=parseIcsDate(dtstart);
+    if(!parsed) return allDay ? 'All day' : '--';
+    var dt=parsed.date;
+    var months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var mon=months[dt.getMonth()];
+    var day=dt.getDate();
+    if(allDay || parsed.allDay) return mon+' '+day+' · All day';
+    function hm(d){ var h=d.getHours(), mi=String(d.getMinutes()).padStart(2,'0'); var ap=h>=12?'PM':'AM'; var h12=h%12; if(h12===0) h12=12; return h12+':'+mi+' '+ap; }
+    var start=hm(dt);
+    var end='';
+    if(dtend){ var pe=parseIcsDate(dtend); if(pe) end=' – '+hm(pe.date); }
+    return mon+' '+day+' · '+start+end;
+  }
+  function canonKey(raw, allDay){
+    var p=parseIcsDate(raw);
+    if(!p) return '';
+    var key=''+p.y+String(p.mo).padStart(2,'0')+String(p.d).padStart(2,'0');
+    if(!allDay && !p.allDay){
+      var h=p.date.getHours(), mi=p.date.getMinutes();
+      key+='T'+String(h).padStart(2,'0')+String(mi).padStart(2,'0')+'00';
+    }
+    return key;
+  }
+  function expandRecurrence(events, windowStart, windowEnd){
+    var out=[];
+    var overrides={};
+    events.forEach(function(e){
+      if(e.recurrenceId){
+        var k=canonKey(e.recurrenceId, e.allDay);
+        overrides[e.id+'@'+k]=e;
+      }
+    });
+    events.forEach(function(e){
+      if(e.recurrenceId) return;
+      var rrule=(e.rrule||'').toUpperCase();
+      if(!rrule){ out.push(e); return; }
+      var freq=(rrule.match(/FREQ=([A-Z]+)/)||[])[1];
+      var interval=parseInt((rrule.match(/INTERVAL=(\d+)/)||[])[1]||'1',10);
+      var countLimit=parseInt((rrule.match(/COUNT=(\d+)/)||[])[1]||'0',10);
+      var untilRaw=(rrule.match(/UNTIL=([0-9TZ]+)/)||[])[1]||'';
+      var until=untilRaw?parseIcsDate(untilRaw):null;
+      var sp=parseIcsDate(e.startRaw);
+      if(!sp || !freq){ out.push(e); return; }
+      var allDay=!!e.allDay || sp.allDay;
+      var ep=parseIcsDate(e.endRaw);
+      var dur=ep?ep.date.getTime()-sp.date.getTime():(allDay?86400000:3600000);
+      var exKeys={};
+      String(e.exdate||'').split(',').forEach(function(x){ var k=canonKey(x.trim(), allDay); if(k) exKeys[k]=1; });
+      var h=sp.date.getHours(), mi=sp.date.getMinutes();
+      var y=sp.y, mo=sp.mo, d=sp.d;
+      var slot=0;
+      var startDt=new Date(sp.y,sp.mo-1,sp.d,h,mi).getTime();
+      var jump=0;
+      if(freq==='DAILY') jump=Math.floor((windowStart-startDt)/86400000/interval);
+      else if(freq==='WEEKLY') jump=Math.floor((windowStart-startDt)/(7*86400000)/interval);
+      else if(freq==='MONTHLY') jump=Math.floor(((new Date(windowStart).getFullYear()-sp.y)*12+new Date(windowStart).getMonth()-(sp.mo-1))/interval);
+      else if(freq==='YEARLY') jump=Math.floor((new Date(windowStart).getFullYear()-sp.y)/interval);
+      if(jump>2){
+        if(freq==='DAILY'){ var nd=new Date(sp.y,sp.mo-1,sp.d+(jump-1)*interval); y=nd.getFullYear(); mo=nd.getMonth()+1; d=nd.getDate(); }
+        else if(freq==='WEEKLY'){ var nd=new Date(sp.y,sp.mo-1,sp.d+(jump-1)*7*interval); y=nd.getFullYear(); mo=nd.getMonth()+1; d=nd.getDate(); }
+        else if(freq==='MONTHLY'){ var tm=sp.mo-1+(jump-1)*interval; y=sp.y+Math.floor(tm/12); mo=(tm%12)+1; d=sp.d; }
+        else if(freq==='YEARLY'){ y=sp.y+(jump-1)*interval; }
+        slot=jump-1;
+      }
+      var guard=0;
+      while(guard<120){
+        guard++;
+        if(countLimit && slot>=countLimit) break;
+        var dim=new Date(y, mo, 0).getDate();
+        var valid=d<=dim;
+        if(valid){
+          var cur=allDay?new Date(y,mo-1,d):new Date(y,mo-1,d,h,mi);
+          if(until && cur.getTime()>until.date.getTime()) break;
+          if(cur.getTime()>=windowEnd) break;
+          var key=''+y+String(mo).padStart(2,'0')+String(d).padStart(2,'0');
+          if(!allDay) key+='T'+String(h).padStart(2,'0')+String(mi).padStart(2,'0')+'00';
+          if(cur.getTime()>=windowStart && !exKeys[key]){
+            var ov=overrides[e.id+'@'+key];
+            if(ov){
+              if((ov.status||'').toUpperCase()!=='CANCELLED'){ ov.id=e.id+'@'+key; out.push(ov); }
+            } else {
+              var inst=Object.assign({},e);
+              inst.id=e.id+'@'+key;
+              inst.allDay=allDay;
+              inst.startRaw=key;
+              var endDt=new Date(cur.getTime()+dur);
+              inst.endRaw=''+endDt.getFullYear()+String(endDt.getMonth()+1).padStart(2,'0')+String(endDt.getDate()).padStart(2,'0');
+              if(!allDay) inst.endRaw+='T'+String(endDt.getHours()).padStart(2,'0')+String(endDt.getMinutes()).padStart(2,'0')+'00';
+              inst.when=formatWhen(inst.startRaw, allDay, inst.endRaw);
+              out.push(inst);
+            }
+          }
+          slot++;
+        }
+        if(freq==='DAILY'){ var nd=new Date(y,mo-1,d+interval); y=nd.getFullYear(); mo=nd.getMonth()+1; d=nd.getDate(); }
+        else if(freq==='WEEKLY'){ var nd=new Date(y,mo-1,d+7*interval); y=nd.getFullYear(); mo=nd.getMonth()+1; d=nd.getDate(); }
+        else if(freq==='MONTHLY'){ mo+=interval; while(mo>12){ mo-=12; y++; } d=sp.d; }
+        else if(freq==='YEARLY'){ y+=interval; }
+        else break;
+      }
+    });
+    var seen={};
+    return out.filter(function(e){ if(seen[e.id]) return false; seen[e.id]=1; return true; });
+  }
+  function eventSortKey(e){
+    var p=parseIcsDate(e.startRaw);
+    return p ? p.date.getTime() : 0;
+  }
+  function icsUnescape(s){
+    var bs=String.fromCharCode(92), nl=String.fromCharCode(10);
+    var o='', i=0;
+    while(i<s.length){
+      if(s.charAt(i)===bs && i+1<s.length){
+        var c=s.charAt(i+1);
+        if(c==='n' || c==='N') o+=nl;
+        else if(c===',' || c===';' || c===bs) o+=c;
+        else o+=bs+c;
+        i+=2;
+      } else { o+=s.charAt(i); i++; }
+    }
+    return o;
+  }
+  function parseIcsEvents(ics,calId,calName){
+    var events=[];
+    if(!ics) return events;
+    var unfolded=ics.replace(/\r\n[ \t]/g,' ').replace(/\n[ \t]/g,' ');
+    var parts=unfolded.split(/BEGIN:VEVENT/i).slice(1);
+    parts.forEach(function(part,idx){
+      var end=part.indexOf('END:VEVENT');
+      var body=end>=0?part.slice(0,end):part;
+      function get(prop){
+        var m=new RegExp('^'+prop+'[^:]*:(.*)$','im').exec(body);
+        return m?m[1].trim():'';
+      }
+      var summary=get('SUMMARY')||'(no title)';
+      var uid=get('UID')||('idx'+idx);
+      var dtstart=get('DTSTART');
+      var dtend=get('DTEND');
+      var allDay=/VALUE=DATE/i.test(body) && !/T/.test(dtstart);
+      var when=formatWhen(dtstart, allDay, dtend);
+      var location=get('LOCATION').slice(0,80);
+      var notes=(get('DESCRIPTION')||'').slice(0,MAX_NOTE_CHARS);
+      notes=icsUnescape(notes);
+      if(notes.length) addDiag('VEVENT parsed: notesLen='+notes.length);
+      var rrule=get('RRULE');
+      var exdate=get('EXDATE');
+      var recurrenceId=get('RECURRENCE-ID');
+      var status=get('STATUS');
+      var id=calId+'#'+uid;
+      events.push({
+        id:id,
+        title:summary.slice(0,60),
+        when:when,
+        time:when,
+        allDay:allDay,
+        calendar:calName,
+        location:location,
+        notes:notes,
+        startRaw:dtstart,
+        endRaw:dtend,
+        rrule:rrule,
+        exdate:exdate,
+        recurrenceId:recurrenceId,
+        status:status
+      });
+    });
+    return events.slice(0,80);
+  }
+
+  function discoverAndLoad(account,password){
+    var gen=++requestGen;
+    transientCreds={account:account,password:password,auth:basicAuth(account,password)};
+    var auth=transientCreds.auth;
+    setStatus('CONNECTING','Opening iCloud CalDAV');
+    addDiag('CONNECTING');
+    var headers={'Authorization':auth,'Depth':'0','Content-Type':'application/xml; charset=utf-8','Accept':'application/xml, text/xml'};
+    var body='<?xml version="1.0" encoding="utf-8"?>\r\n<d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><d:current-user-principal/><c:calendar-home-set/></d:prop></d:propfind>\r\n';
+    return davRequest('PROPFIND',ROOT,headers,body,gen).then(function(info){
+      if(info.status===401) throw new Error('AUTHENTICATION FAILED');
+      if(info.status<200||info.status>=300) throw new Error('NETWORK ERROR '+info.status);
+      setStatus('AUTHENTICATING','Principal discovered');
+      addDiag('AUTHENTICATING');
+      var responses=parseMultistatus(info.text);
+      var principal='',home='';
+      responses.forEach(function(r){
+        var p=(r.href||'');
+        if(/principal/i.test(info.text) && !principal) principal=p;
+        if(/calendar-home-set/i.test(info.text) && !home) home=p;
+      });
+      // Fallback: extract from raw XML if simple parse missed nested elements
+      var pm=info.text.match(/<[^>]*current-user-principal[^>]*>[\s\S]*?<[^>]*href[^>]*>([^<]+)/i);
+      var hm=info.text.match(/<[^>]*calendar-home-set[^>]*>[\s\S]*?<[^>]*href[^>]*>([^<]+)/i);
+      if(pm) principal=pm[1].trim();
+      if(hm) home=hm[1].trim();
+      if(!principal && !home) throw new Error('CALENDAR UNAVAILABLE');
+      function resolve(base,href){
+        if(!href) return '';
+        if(/^https:\/\//i.test(href)) return href;
+        try{ return new URL(href,base).href; }catch(e){ return ''; }
+      }
+      var base=info.finalUrl||ROOT;
+      principal=resolve(base,principal);
+      home=resolve(base,home);
+      if(home && !isTrustedICloud(home)) throw new Error('Untrusted calendar home');
+      if(!home && principal && isTrustedICloud(principal)){
+        // secondary PROPFIND on principal
+        return davRequest('PROPFIND',principal,headers,body,gen).then(function(pinfo){
+          var hm2=pinfo.text.match(/<[^>]*calendar-home-set[^>]*>[\s\S]*?<[^>]*href[^>]*>([^<]+)/i);
+          home=hm2?resolve(pinfo.finalUrl||principal,hm2[1].trim()):'';
+          if(!home || !isTrustedICloud(home)) throw new Error('Missing calendar home');
+          return home;
+        });
+      }
+      if(!home) throw new Error('Missing calendar home');
+      return home;
+    }).then(function(home){
+      setStatus('DISCOVERING CALENDARS',home);
+      addDiag('DISCOVERING CALENDARS');
+      var h2={'Authorization':auth,'Depth':'1','Content-Type':'application/xml; charset=utf-8','Accept':'application/xml, text/xml'};
+      var b2='<?xml version="1.0" encoding="utf-8"?>\r\n<d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><d:displayname/><d:resourcetype/></d:prop></d:propfind>\r\n';
+      return davRequest('PROPFIND',ensureSlash(home),h2,b2,gen).then(function(info){
+        if(info.status===401) throw new Error('AUTHENTICATION FAILED');
+        var responses=parseMultistatus(info.text);
+        var cals=[];
+        responses.forEach(function(r){
+          if(r.isCalendar && r.href){
+            var url;
+            try{ url=new URL(r.href,info.finalUrl||home).href; }catch(e){ url=''; }
+            if(url && isTrustedICloud(url)) cals.push({id:'icloud:'+cals.length,name:(r.displayName||'Calendar').slice(0,60),href:ensureSlash(url)});
+          }
+        });
+        if(!cals.length) throw new Error('CALENDAR UNAVAILABLE');
+        return cals.slice(0,8);
+      });
+    }).then(function(cals){
+      setStatus('LOADING EVENTS',cals.length+' calendars');
+      addDiag('LOADING EVENTS');
+      var now=new Date();
+      var ay,am;
+      if(preferences.defaultView==='week' && weekAnchor){
+        var wa=new Date(weekAnchor);
+        ay=wa.getFullYear(); am=wa.getMonth();
+      } else if(monthAnchor){
+        ay=monthAnchor.y; am=monthAnchor.m;
+      } else {
+        ay=now.getFullYear(); am=now.getMonth();
+      }
+      var start=new Date(ay,am,1-14);
+      var end=new Date(ay,am+1,21);
+      var report='<?xml version="1.0" encoding="utf-8"?>\r\n<c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><d:getetag/><c:calendar-data/></d:prop><c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VEVENT"><c:time-range start="'+toIcalUtc(start)+'" end="'+toIcalUtc(end)+'"/></c:comp-filter></c:comp-filter></c:filter></c:calendar-query>\r\n';
+      var h3={'Authorization':auth,'Depth':'1','Content-Type':'application/xml; charset=utf-8','Accept':'application/xml, text/xml'};
+      var all=[];
+      var i=0;
+      function next(){
+        if(i>=cals.length) return Promise.resolve(all);
+        var c=cals[i++];
+        return davRequest('REPORT',c.href,h3,report,gen).then(function(info){
+          if(info.status===401) throw new Error('AUTHENTICATION FAILED');
+          var responses=parseMultistatus(info.text);
+          responses.forEach(function(r){
+            if(r.calendarData){
+              var evs=parseIcsEvents(r.calendarData,c.id,c.name);
+              evs.forEach(function(e){ all.push(e); });
+            }
+          });
+          return next();
+        }).catch(function(err){
+          addDiag(redact(c.name+': '+err.message));
+          return next();
+        });
+      }
+      return next().then(function(){
+        all=expandRecurrence(all, start.getTime(), end.getTime());
+        loadedRange={start:start.getTime(),end:end.getTime()};
+        knownCals=cals;
+        all.sort(function(a,b){ return eventSortKey(a)-eventSortKey(b); });
+        return {calendars:cals,events:all.slice(0,200)};
+      });
+    });
+  }
+
+  function rangeForAnchor(){
+    var now=new Date();
+    var ay,am;
+    if(preferences.defaultView==='week' && weekAnchor){
+      var wa=new Date(weekAnchor); ay=wa.getFullYear(); am=wa.getMonth();
+    } else if(monthAnchor){ ay=monthAnchor.y; am=monthAnchor.m; }
+    else { ay=now.getFullYear(); am=now.getMonth(); }
+    return {start:new Date(ay,am,1-14), end:new Date(ay,am+1,21)};
+  }
+  function ensureRange(){
+    if(!transientCreds || !knownCals.length) return;
+    var r=rangeForAnchor();
+    if(loadedRange && r.start.getTime()>=loadedRange.start && r.end.getTime()<=loadedRange.end) return;
+    setStatus('Loading…','Fetching '+r.start.toDateString());
+    addDiag('RANGE RELOAD');
+    var gen=++requestGen;
+    var auth=transientCreds.auth;
+    var report='<?xml version="1.0" encoding="utf-8"?>\r\n<c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav"><d:prop><d:getetag/><c:calendar-data/></d:prop><c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VEVENT"><c:time-range start="'+toIcalUtc(r.start)+'" end="'+toIcalUtc(r.end)+'"/></c:comp-filter></c:comp-filter></c:filter></c:calendar-query>\r\n';
+    var h3={'Authorization':auth,'Depth':'1','Content-Type':'application/xml; charset=utf-8','Accept':'application/xml, text/xml'};
+    var all=[];
+    var i=0;
+    function next(){
+      if(i>=knownCals.length) return Promise.resolve(all);
+      var c=knownCals[i++];
+      return davRequest('REPORT',c.href,h3,report,gen).then(function(info){
+        if(gen!==requestGen) return all;
+        var responses=parseMultistatus(info.text||'');
+        responses.forEach(function(rr){ if(rr.calendarData){ parseIcsEvents(rr.calendarData,c.id,c.name).forEach(function(e){ all.push(e); }); } });
+        return next();
+      }).catch(function(){ return next(); });
+    }
+    next().then(function(){
+      if(gen!==requestGen) return;
+      all=expandRecurrence(all, r.start.getTime(), r.end.getTime());
+      all.sort(function(a,b){ return eventSortKey(a)-eventSortKey(b); });
+      loadedRange={start:r.start.getTime(),end:r.end.getTime()};
+      liveState.events=all.slice(0,200);
+      liveState.revision=Date.now();
+      publishState();
+    });
+  }
+  function buildWeekModel(events){
+    var realNow=new Date();
+    var anchor=weekAnchor?new Date(weekAnchor):realNow;
+    var start=new Date(anchor.getFullYear(),anchor.getMonth(),anchor.getDate()-anchor.getDay());
+    var months=['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+    var names=['S','M','T','W','T','F','S'];
+    var dayStr=[],occStr=[],today=-1;
+    for(var d=0;d<7;d++){
+      var dt=new Date(start.getFullYear(),start.getMonth(),start.getDate()+d);
+      var key=dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
+      dayStr.push(names[d]+dt.getDate());
+      var allday=0,morning=0,afternoon=0,evening=0;
+      events.forEach(function(e){
+        var p=parseIcsDate(e.startRaw);
+        if(!p) return;
+        var ek=p.date.getFullYear()+'-'+String(p.date.getMonth()+1).padStart(2,'0')+'-'+String(p.date.getDate()).padStart(2,'0');
+        if(ek!==key) return;
+        if(e.allDay){ allday++; return; }
+        var h=p.date.getHours();
+        if(h<12) morning++; else if(h<17) afternoon++; else evening++;
+      });
+      occStr.push(Math.min(allday,3)+','+Math.min(morning,3)+','+Math.min(afternoon,3)+','+Math.min(evening,3));
+      if(dt.toDateString()===realNow.toDateString()) today=d;
+    }
+    var end=new Date(start.getFullYear(),start.getMonth(),start.getDate()+6);
+    var label=months[start.getMonth()]+' '+start.getDate();
+    if(start.getMonth()!==end.getMonth()||start.getFullYear()!==end.getFullYear()){
+      label+='-'+months[end.getMonth()]+' '+end.getDate();
+    } else {
+      label+='-'+end.getDate();
+    }
+    var sy=start.getFullYear(), sm=start.getMonth()+1, sd=start.getDate();
+    var ev=[];
+    events.forEach(function(e){
+      var p=parseIcsDate(e.startRaw);
+      if(!p || e.allDay) return;
+      var day=Math.floor((p.date.getTime()-start.getTime())/86400000);
+      if(day<0 || day>6) return;
+      var mins=p.date.getHours()*60+p.date.getMinutes();
+      var h=p.date.getHours()%12; if(h===0) h=12;
+      var mi=p.date.getMinutes();
+      var lab=mi?h+':'+String(mi).padStart(2,'0'):String(h);
+      if(ev.length<42) ev.push(day+','+mins+','+lab);
+    });
+    return {type:'week',l:label,d:dayStr.join(','),o:occStr.join(';'),e:ev.join(';'),t:today,start:sy+'-'+sm+'-'+sd,rev:Date.now()};
+  }
+  function buildMonthModel(events){
+    var now=new Date();
+    var y=monthAnchor?monthAnchor.y:now.getFullYear();
+    var m=monthAnchor?monthAnchor.m:now.getMonth();
+    var first=new Date(y,m,1);
+    var start=new Date(y,m,1-first.getDay());
+    var days=[],occ=[],todayCell=-1;
+    for(var i=0;i<42;i++){
+      var dt=new Date(start.getFullYear(),start.getMonth(),start.getDate()+i);
+      var inMonth=dt.getMonth()===m;
+      days.push(dt.getDate());
+      var key=dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
+      var count=0;
+      events.forEach(function(e){
+        var p=parseIcsDate(e.startRaw);
+        if(!p) return;
+        var ek=p.date.getFullYear()+'-'+String(p.date.getMonth()+1).padStart(2,'0')+'-'+String(p.date.getDate()).padStart(2,'0');
+        if(ek===key) count++;
+      });
+      occ.push(Math.min(count,3));
+      if(dt.toDateString()===now.toDateString()) todayCell=i;
+    }
+    var months=['JANUARY','FEBRUARY','MARCH','APRIL','MAY','JUNE','JULY','AUGUST','SEPTEMBER','OCTOBER','NOVEMBER','DECEMBER'];
+    var inMonth='';
+    var rows=6;
+    // drop a trailing week that is entirely next month
+    var lastRowAllNext=true;
+    for(var c=35;c<42;c++){ var dt3=new Date(start.getFullYear(),start.getMonth(),start.getDate()+c); if(dt3.getMonth()===m) lastRowAllNext=false; }
+    if(lastRowAllNext) rows=5;
+    var nCells=rows*7;
+    for(var im=0;im<nCells;im++){ var dt2=new Date(start.getFullYear(),start.getMonth(),start.getDate()+im); inMonth+=(dt2.getMonth()===m?'1':'0'); }
+    var sy=start.getFullYear(), sm=start.getMonth()+1, sd=start.getDate();
+    return {type:'month',l:months[m]+' '+y,y:y,mo:m+1,start:sy+'-'+sm+'-'+sd,d:days.slice(0,nCells).join(','),o:occ.slice(0,nCells).join(''),m:inMonth,rows:rows,t:todayCell,rev:Date.now()};
+  }
+  function publishState(){
+    var items=[],summary='',statusText='Ready';
+    if(mode==='mock'){
+      if(mockScenario==='empty') items=[];
+      else if(mockScenario==='many'){
+        for(var i=0;i<6;i++) items.push({id:'demo-'+i,title:'Busy item '+(i+1),when:'10:'+(i*10),allDay:false});
+      } else if(mockScenario==='phase5'){
+        items=[
+          {id:'rec-1',title:'Weekly standup',when:'09:00',allDay:false},
+          {id:'rec-2',title:'Override instance',when:'09:00',allDay:false},
+          {id:'rec-3',title:'EXDATE skipped',when:'09:00',allDay:false}
+        ];
+      } else {
+        items=[
+          {id:'demo-1',title:'Standup with the platform team about the quarterly roadmap',when:'09:00-09:30',allDay:false,calendar:'Work',location:'Room 4 / Zoom',notes:'Discuss Q4 priorities. Bring the draft deck. Follow up on the API review from last week. Confirm owners for the three open items and schedule the next checkpoint before Friday.'},
+          {id:'demo-2',title:'Design review',when:'14:00-15:30',allDay:false,calendar:'Work',location:'Studio',notes:'Review the new layout.'},
+          {id:'demo-3',title:'All-day focus',when:'All day',allDay:true,calendar:'Personal',location:'',notes:''}
+        ];
+      }
+      summary='DEMO DATA';
+      statusText='Demo ready';
+    } else {
+      if(liveState.status==='CONNECTED'){
+        var all=liveState.events||[];
+        var now=new Date();
+        var todayKey=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0');
+        var tomorrow=new Date(now.getFullYear(),now.getMonth(),now.getDate()+1);
+        var tomKey=tomorrow.getFullYear()+'-'+String(tomorrow.getMonth()+1).padStart(2,'0')+'-'+String(tomorrow.getDate()).padStart(2,'0');
+        function dayKey(e){
+          var p=parseIcsDate(e.startRaw);
+          if(!p) return '';
+          var dt=p.date;
+          return dt.getFullYear()+'-'+String(dt.getMonth()+1).padStart(2,'0')+'-'+String(dt.getDate()).padStart(2,'0');
+        }
+        function endMs(e){
+          var p=parseIcsDate(e.endRaw||e.startRaw);
+          return p?p.date.getTime():0;
+        }
+        function overlapsDay(e, dayStart, dayEnd){
+          var sp=parseIcsDate(e.startRaw);
+          if(!sp) return false;
+          var start=sp.date.getTime();
+          var ep=parseIcsDate(e.endRaw||e.startRaw);
+          var end=ep?ep.date.getTime():start+3600000;
+          if(e.allDay) end=start+86400000;
+          return start<dayEnd && end>dayStart;
+        }
+        var filtered=all;
+        var v=preferences.defaultView||'next';
+        var dayStart=new Date(now.getFullYear(),now.getMonth(),now.getDate()).getTime();
+        var dayEnd=dayStart+86400000;
+        var tomStart=dayStart+86400000;
+        var tomEnd=tomStart+86400000;
+        if(v==='next'){
+          // ongoing or future, max 3
+          filtered=all.filter(function(e){
+            var sp=parseIcsDate(e.startRaw);
+            if(!sp) return false;
+            var start=sp.date.getTime();
+            var ep=parseIcsDate(e.endRaw||e.startRaw);
+            var end=ep?ep.date.getTime():start+3600000;
+            return end>now.getTime();
+          }).slice(0,3);
+        } else if(v==='today'){
+          filtered=all.filter(function(e){ return overlapsDay(e, dayStart, dayEnd); });
+        } else if(v==='tomorrow'){
+          filtered=all.filter(function(e){ return overlapsDay(e, tomStart, tomEnd); });
+        } else if(v==='day' && preferences.dayAnchor){
+          var da=preferences.dayAnchor;
+          var ds=new Date(da.y,da.m,da.d).getTime();
+          var de=ds+86400000;
+          filtered=all.filter(function(e){ return overlapsDay(e, ds, de); });
+        } else if(v==='upcoming'){
+          filtered=all.filter(function(e){
+            var sp=parseIcsDate(e.startRaw);
+            if(!sp) return false;
+            var ep=parseIcsDate(e.endRaw||e.startRaw);
+            var end=ep?ep.date.getTime():sp.date.getTime();
+            return end>=dayStart;
+          });
+        }
+        var page=preferences.page||0;
+        var pageSize=6;
+        var start=page*pageSize;
+        items=filtered.slice(start,start+pageSize).map(function(e){
+          return {id:e.id,title:e.title,when:e.when||e.time||'',allDay:!!e.allDay};
+        });
+        preferences.pageCount=Math.max(1,Math.ceil(filtered.length/pageSize));
+        summary=filtered.length+' events · page '+(page+1)+'/'+preferences.pageCount;
+        statusText='CONNECTED';
+      } else if(liveState.status==='ERROR'){
+        items=[];
+        summary=liveState.error||'Connection failed';
+        statusText=liveState.error||'REFRESH FAILED';
+      } else {
+        items=[];
+        summary='Not connected';
+        statusText='Waiting for connection';
+      }
+    }
+    var v=preferences.defaultView||'next';
+    if(v==='week' && mode==='live' && liveState.status==='CONNECTED'){
+      var week=buildWeekModel(liveState.events||[]);
+      send(week);
+      setStatus('WEEK',week.l||'');
+      return;
+    }
+    if(v==='month' && mode==='live' && liveState.status==='CONNECTED'){
+      var month=buildMonthModel(liveState.events||[]);
+      send(month);
+      setStatus('MONTH',month.l||'');
+      return;
+    }
+    var heading='';
+    if(v==='day' && preferences.dayAnchor){
+      var da=preferences.dayAnchor;
+      var names=['SUN','MON','TUE','WED','THU','FRI','SAT'];
+      var months=['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+      var dt=new Date(da.y,da.m,da.d);
+      heading=names[dt.getDay()]+' '+months[da.m]+' '+da.d;
+    }
+    var rev=Date.now(); if(rev<=lastRevision) rev=lastRevision+1; lastRevision=rev;
+    var tokenMap={};
+    items=items.slice(0,6).map(function(it,idx){
+      var token='E'+nextToken++;
+      var full=null;
+      var src=(liveState.events||[]);
+      for(var i=0;i<src.length;i++){ if(src[i].id===it.id){ full=src[i]; break; } }
+      tokenMap[token]=full||it;
+      return {id:token,title:it.title,when:it.when,allDay:!!it.allDay};
+    });
+    revSnapshots.push({rev:rev,tokens:tokenMap});
+    if(revSnapshots.length>3) revSnapshots.shift();
+    var state={type:'state',mode:mode,view:v,items:items,page:preferences.page||0,pageCount:preferences.pageCount||1,status:statusText,summary:summary,heading:heading,gate:'CLOSED',rev:rev};
+    send(state);
+    setStatus(statusText,summary);
+    addDiag('Published '+items.length+' items (rev '+state.revision+')');
+  }
+
+  modeEl.onchange=function(){
+    mode=modeEl.value;
+    syncModeUi();
+    if(mode==='mock'){
+      // invalidate live credential usage while in Demo; password stays erased from inputs
+      eraseTransient();
+      liveState={status:'IDLE',calendars:[],events:[],revision:Date.now(),error:''};
+      addDiag('Mode switched to Demo: live credentials invalidated');
+    } else {
+      liveState.status='IDLE'; liveState.events=[]; liveState.calendars=[];
+    }
+    send({type:'setMode',mode:mode});
+    publishState();
+  };
+  document.getElementById('mockScenario').onchange=function(){
+    mockScenario=this.value;
+    send({type:'setMockScenario',scenario:mockScenario});
+    publishState();
+  };
+  document.getElementById('refresh').onclick=function(){
+    if(mode==='mock') publishState();
+    else if(transientCreds){
+      connectBtn.disabled=true;
+      discoverAndLoad(transientCreds.account,transientCreds.password).then(function(result){
+        liveState={status:'CONNECTED',calendars:result.calendars,events:result.events,revision:Date.now(),error:''};
+        setStatus('CONNECTED',result.calendars.length+' calendars, '+result.events.length+' events');
+        publishState();
+      }).catch(function(err){
+        var msg=redact(err&&err.message||'REFRESH FAILED');
+        liveState={status:'ERROR',calendars:[],events:[],revision:Date.now(),error:msg};
+        setStatus(msg,'Live connection failed');
+        publishState();
+      }).finally(function(){ connectBtn.disabled=false; });
+    } else {
+      setStatus('Enter credentials and Connect','No active session');
+    }
+  };
+  document.getElementById('showNext').onclick=function(){
+    preferences.defaultView='next';
+    send({type:'showView',view:'next'});
+    publishState();
+  };
+  function clearPasswordField(){ var el=document.getElementById('appPassword'); if(el) el.value=''; }
+  function persistAccount(email){
+    // non-secret only; never store the password
+    try{ if(window.miraCompanion && miraCompanion.storeSet) miraCompanion.storeSet('ziggy.account', email); }catch(e){}
+  }
+  function restoreAccount(){
+    try{
+      if(window.miraCompanion && miraCompanion.storeGet){
+        miraCompanion.storeGet('ziggy.account').then(function(v){
+          if(v && typeof v==='string' && !document.getElementById('account').value) document.getElementById('account').value=v;
+        }).catch(function(){});
+      }
+    }catch(e){}
+  }
+  function eraseTransient(){
+    transientCreds=null;
+    requestGen++;
+    clearPasswordField();
+  }
+  connectBtn.onclick=function(){
+    var a=document.getElementById('account').value.trim();
+    var p=document.getElementById('appPassword').value.trim();
+    clearPasswordField(); // clear visible password immediately after capture
+    if(!a||!p){ setStatus('Enter Apple Account and app-specific password',''); return; }
+    if(mode!=='live'){ setStatus('Switch to Live mode first',''); return; }
+    connectBtn.disabled=true;
+    setStatus('CONNECTING','');
+    discoverAndLoad(a,p).then(function(result){
+      liveState={status:'CONNECTED',calendars:result.calendars,events:result.events,revision:Date.now(),error:''};
+      persistAccount(a);
+      setStatus('CONNECTED · session active',result.calendars.length+' calendars, '+result.events.length+' events');
+      addDiag('CONNECTED (session retained)');
+      publishState();
+    }).catch(function(err){
+      var msg=redact(err&&err.message||'NETWORK ERROR');
+      if(/401|AUTHENTICATION/i.test(msg)) msg='AUTHENTICATION FAILED';
+      else if(/untrusted|host/i.test(msg)) msg='NETWORK ERROR';
+      else if(/unavailable|home|principal/i.test(msg)) msg='CALENDAR UNAVAILABLE';
+      liveState={status:'ERROR',calendars:[],events:[],revision:Date.now(),error:msg};
+      setStatus(msg,'Live connection failed');
+      addDiag(msg);
+      publishState();
+    }).finally(function(){ connectBtn.disabled=false; });
+  };
+  document.getElementById('disconnect').onclick=function(){
+    eraseTransient();
+    liveState={status:'IDLE',calendars:[],events:[],revision:Date.now(),error:''};
+    setStatus('Disconnected','Credentials discarded. Re-enter password to connect.');
+    addDiag('User disconnect: credentials erased');
+    publishState();
+  };
+
+  var stop=miraCompanion.onFromApp(function(message){
+    if(message&&message.type==='showView'){
+      var v=String(message.view||'NEXT').toLowerCase();
+      preferences.defaultView=v==='next'?'next':v==='today'?'today':v==='tomorrow'?'tomorrow':v==='upcoming'?'upcoming':v==='week'?'week':v==='month'?'month':'next';
+      preferences.page=Number(message.page)||0;
+      publishState();
+      return;
+    }
+    if(!message||typeof message.type!=='string') return;
+    if(message.type==='stop'){
+      connected=false;
+      eraseTransient();
+      liveState={status:'IDLE',calendars:[],events:[],revision:0,error:''};
+      setStatus('Glasses app stopped.','Credentials discarded');
+      if(stop){stop();stop=null;}
+    } else if(message.type==='day'){
+      var date=String(message.date||'');
+      var parts=date.split('-');
+      var y,m,d;
+      if(parts.length===3){
+        y=parseInt(parts[0],10); m=parseInt(parts[1],10)-1; d=parseInt(parts[2],10);
+      } else {
+        addDiag('DAY REQUEST REJECTED: missing exact date');
+        return;
+      }
+      preferences.dayAnchor={y:y,m:m,d:d};
+      preferences.defaultView='day';
+      preferences.page=0;
+      publishState();
+    } else if(message.type==='weekNav'){
+      var base=weekAnchor?new Date(weekAnchor):new Date();
+      base.setDate(base.getDate()+(message.dir||0)*7);
+      weekAnchor=base.getTime();
+      publishState();
+      ensureRange();
+    } else if(message.type==='monthNav'){
+      var now=new Date();
+      var y=monthAnchor?monthAnchor.y:now.getFullYear();
+      var m=monthAnchor?monthAnchor.m:now.getMonth();
+      var dir=message.dir||0;
+      m+=dir;
+      while(m<0){ m+=12; y--; }
+      while(m>11){ m-=12; y++; }
+      monthAnchor={y:y,m:m};
+      publishState();
+      ensureRange();
+    } else if(message.type==='select'){
+      var sid=String(message.id||'');
+      var found=null;
+      var wantRev=message.rev||0;
+      if(mode==='live'){
+        var snap=null;
+        for(var s=0;s<revSnapshots.length;s++){ if(revSnapshots[s].rev===wantRev){ snap=revSnapshots[s]; break; } }
+        if(snap && snap.tokens && snap.tokens[sid]) found=snap.tokens[sid];
+        if(!found){
+          var hits=[];
+          for(var s=0;s<revSnapshots.length;s++){ if(revSnapshots[s].tokens && revSnapshots[s].tokens[sid]) hits.push(revSnapshots[s].tokens[sid]); }
+          if(hits.length===1) found=hits[0];
+        }
+      } else if(mode==='mock'){
+        // rebuild current mock items to find by id
+        var mockItems=[];
+        if(mockScenario==='many'){ for(var j=0;j<6;j++) mockItems.push({id:'demo-'+j,title:'Busy item '+(j+1),when:'10:'+(j*10),allDay:false,calendar:'Demo',location:'',notes:''}); }
+        else if(mockScenario==='phase5'){ mockItems=[{id:'rec-1',title:'Weekly standup',when:'09:00',allDay:false,calendar:'Demo',location:'',notes:'Recurring'},{id:'rec-2',title:'Override instance',when:'09:00',allDay:false,calendar:'Demo',location:'',notes:''},{id:'rec-3',title:'EXDATE skipped',when:'09:00',allDay:false,calendar:'Demo',location:'',notes:''}]; }
+        else { mockItems=[{id:'demo-1',title:'Standup',when:'09:00',allDay:false,calendar:'Demo',location:'',notes:''},{id:'demo-2',title:'Design review',when:'14:00',allDay:false,calendar:'Demo',location:'',notes:''},{id:'demo-3',title:'All-day focus',when:'All day',allDay:true,calendar:'Demo',location:'',notes:''}]; }
+        for(var k=0;k<mockItems.length;k++){ if(mockItems[k].id===sid){ found=mockItems[k]; break; } }
+      }
+      if(found){
+        var notes=String(found.notes||'');
+        var lines=[];
+        notes.split(String.fromCharCode(10)).forEach(function(para){
+          var words=para.split(/\s+/);
+          var cur='';
+          words.forEach(function(w){
+            if(!w) return;
+            while(w.length>28){ if(cur){ lines.push(cur); cur=''; } lines.push(w.slice(0,28)); w=w.slice(28); }
+            if((cur+' '+w).trim().length>28){ if(cur) lines.push(cur); cur=w; }
+            else cur=(cur?cur+' ':'')+w;
+          });
+          if(cur) lines.push(cur);
+        });
+        var pages=[];
+        var per=NOTE_LINES_PER_PAGE;
+        if(!lines.length) pages=[''];
+        else { for(var pi=0;pi<lines.length && pages.length<MAX_NOTE_PAGES;pi+=per) pages.push(lines.slice(pi,pi+per).join(String.fromCharCode(10))); }
+        var dp=message.detailPage||0;
+        if(dp<0) dp=0; if(dp>=pages.length) dp=pages.length-1;
+        addDiag('DETAIL sent: page='+dp+' pageCount='+pages.length+' notesLen='+pages[dp].length);
+        send({type:'detail',id:sid,title:(found.title||'').slice(0,48),when:(found.when||'').slice(0,32),cal:(found.calendar||'').slice(0,24),loc:(found.location||'').slice(0,40),notes:pages[dp],page:dp,pageCount:pages.length,rev:message.rev||0});
+        setStatus('Details sent for '+sid,'');
+      } else {
+        send({type:'detail',id:sid,title:'EVENT NO LONGER AVAILABLE',rev:message.rev||0});
+        setStatus('Event not found: '+sid,'');
+      }
+    }
+  });
+  syncModeUi();
+  restoreAccount();
+  publishState();
+  gateEl.textContent='Live write gate: CLOSED · scheduling side-effect gate: CLOSED';
+  addDiag('Ready. Live writes CLOSED.');
+  var helpLink=document.getElementById('helpLink');
+  var helpPanel=document.getElementById('ziggy-help');
+  if(helpLink && helpPanel){
+    helpLink.addEventListener('click', function(ev){
+      ev.preventDefault();
+      helpPanel.open=true;
+      if(helpPanel.scrollIntoView) helpPanel.scrollIntoView({behavior:'smooth', block:'start'});
+    });
+  }
+})();
+</script>
+<script type="application/mira-wasm">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AUsbNgLsr4GAAEEAQQA2AuivgYAACyACQRBqJICAgIAAC64BAQN/I4CAgIAAQTBrIgEkgICAgABBACECIAFBCGpBAEEo/AsAA0ACQCACQRhHDQACQAJAIABBf0wNACABQSFqIQJBGiEAQTEhAwwBCyABQTE6ACEgAUEiaiECQRshAEEtIQMLIAJB/QA6AAAgASADOgAgIAFBCGogABCSgICAACABQTBqJICAgIAADwsgAUEIaiACaiACQbjGgIAAai0AADoAACACQQFqIQIMAAsL0wEBA38CQAJAAkACQCADRQ0AQQAhBiABIQdBACEIA0AgAyAHSw0EAkAgACAIaiADIAIgAxCVgICAAA0AIAhBAWohCCAHQX9qIQcMAQsLIAggA2oiByABSQ0BDAILEJaAgIAAAAsgByAAIAdqLQAAQSJGaiEHC0EAIQNBACABIAdrIgggCCABSxshBiAAIAdqIQgDQCAGIANGDQECQAJAIAggA2otAAAiB0EiRg0AIAMgBUkNAQsgAyEGDAILIAQgA2ogBzoAACADQQFqIQMMAAsLIAYLIwEBf0EAIQQCQCABIANHDQAgACACIAEQtoCAgABFIQQLIAQLCQAQtYCAgAAAC64BAQN/I4CAgIAAQTBrIgEkgICAgABBACECIAFBCGpBAEEo/AsAA0ACQCACQRlHDQACQAJAIABBf0wNACABQSJqIQJBGyEAQTEhAwwBCyABQTE6ACIgAUEjaiECQRwhAEEtIQMLIAJB/QA6AAAgASADOgAhIAFBCGogABCSgICAACABQTBqJICAgIAADwsgAUEIaiACaiACQdDGgIAAai0AADoAACACQQFqIQIMAAsLwQMBBX8jgICAgABBoAFrIgEkgICAgABBACECAkBBACgCuLqBgAAiA0UNACABIQQgAUEAQaAB/AsAAkACQAJAA0ACQCACQRdHDQAgAUEXaiEFQQAhAgNAAkAgAyACRw0AIAEgAmpBF2ohBUEAIQMDQAJAIANBD0cNACACIANqQRdqIQICQCAAQQpJDQAgAkGgAU8NByABIAJqIABBCm4iA0EwajoAACACQQFqIQIgACADQQpsayEACyACQaABTw0HIAEgAmogAEEwcjoAACABIAJBAWoiBWohA0EAIQIDQAJAIAJBCUcNACAEIAUgAmoQkoCAgAAMCwsgAyACaiAC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8AM3AiAgBkKfgICA8AM3AhggBkKfgICA4AM3AhAgBkKfgICA4AM3AgggBkKfgICAwAM3AgAgBSABaiECA0ACQAJAIANBAkcNACAEQQNxDQAgBEGQA28hBUEdIQEgBEHkAG8NASAFRQ0BCyAGIAMgA0EAR2siAUELIAFBC0kbQQJ0aigCACEBCwJAIAIgAUwNAEEBIANBAWoiAyADQQxKIgUbIQMgAiABayECIAQgBWohBAwBCwsgACACNgIIIAAgAzYCBCAAIAQ2AgALXQEBfyOAgICAAEEQayIEJICAgIAAIARBCGogASADIAEgA0kbIgMgACABQczIgIAAEJ2AgIAAIAQoAgggBCgCDCACIANB3MiAgAAQnoCAgAAgBEEQaiSAgICAACADC00BAX8jgICAgABBEGsiBSSAgICAACAFQQhqQQAgASACIAMgBBCqgICAACAFKAIMIQQgACAFKAIINgIAIAAgBDYCBCAFQRBqJICAgIAACywAAkAgASADRw0AAkAgAUUNACAAIAIgAfwKAAALDwsgASADIAQQo4CAgAAAC78CAQh/I4CAgIAAQRBrIgMkgICAgABBACEEQQAgAkF4aiIFIAUgAksbIQUCQANAAkAgBCAFRw0AIABBADYCCCAAQgA3AgAMAgsCQCABQYTDgIAAQQkQtoCAgABFDQAgBEEBaiEEIAFBAWohAQwBCwtBACEGIANBADYCCCADQgA3AwBBCSEFQQAhB0EAIQgCQANAIAQgBWogAk8NASABIAVqLQAAIglBIkYNASAHQQNPDQECQAJAIAlBUGpB/wFxIgpBCkkiCQ0AIAZBAXFFDQEgAyAHQQJ0aiAINgIAIAdBAWohB0EAIQgMAQsgCEEKbCAKaiEICyAFQQFqIQUgCSEGDAALCwJAIAYgB0EDSXFFDQAgAyAHQQJ0aiAINgIACyAAIAMoAgg2AgggACADKQMANwIACyADQRBqJICAgIAAC/sCAQJ/I4CAgIAAQTBrIgMkgICAgABBACEEIANBBGpBAEEo/AsAAkACQAJAAkADQAJAIARBFkcNACADQRY2AiwgA0EEaiADQSxqIABBBBChgICAACADKAIsIgRBJ0sNAiADQQRqIARqQS06AAAgAyAEQQFqNgIsIANBBGogA0EsaiABQQIQoYCAgAAgAygCLCIEQShPDQMgA0EEaiAEakEtOgAAIAMgBEEBajYCLCADQQRqIANBLGogAkECEKGAgIAAIAMoAiwiBEEoTw0EIANBBGogBGpBIjoAACAEQQFqIQAgBEEnRw0FIABBKEG0yYCAABCNgICAAAALIANBBGogBGogBEHsyICAAGotAAA6AAAgBEEBaiEEDAALCyAEQShBhMmAgAAQjYCAgAAACyAEQShBlMmAgAAQjYCAgAAACyAEQShBpMmAgAAQjYCAgAAACyADQQRqIABqQf0AOgAAIANBBGogBEECahCSgICAACADQTBqJICAgIAAC6YBAQR/I4CAgIAAQRBrIgRBADYCDCAEQQxqQX9qIQUgAyEGAkADQAJAIAYNACABKAIAIQVBACEGA0AgBUEoSSEHA0AgAyAGIgJGDQQgAkEBaiEGIAdFDQALIAEgBUEBaiIHNgIAIAAgBWogBEEMaiACai0AADoAACAHIQUMAAsLIAUgBmogAiACQQptIgdBCmxrQTBqOgAAIAZBf2ohBiAHIQIMAAsLC0wBAX8jgICAgABBEGsiBCSAgICAACAEQQhqIAIgAUGAICADEJ2AgIAAIAQoAgwhAyAAIAQoAgg2AgAgACADNgIEIARBEGokgICAgAALCQAQtYCAgAAAC4gCAQR/I4CAgIAAQTBrIgIkgICAgAACQAJAQQAoAqCPgYAADQAgAkEQakHszoCAAEEAKALsjoGAAEHsy4CAABClgICAACACKAIUIQMgAigCECEEDAELIAJBGGpB7M6AgABBAC8B8I6BgABBACgC7I6BgABB/MuAgAAQpoCAgAAgAigCHCEDIAIoAhghBAtBACEFIAJBADoALCACIAQ2AiQgAiADNgIoAkACQCABRQ0AIAJBCGogAkEkahCngICAACACKAIIDQAMAQsgAiACQSRqEKeAgIAAIAIoAgQhASACKAIAIQULIAAgAUEAIAUbNgIEIAAgBUEBIAUbNgIAIAJBMGokgICAgAALKwACQCACQYEgSQ0AQQAgAkGAICADEKuAgIAAAAsgACACNgIEIAAgATYCAAs7AAJAAkAgAyACSQ0AIANBgSBJDQELIAIgA0GAICAEEKuAgIAAAAsgACADIAJrNgIEIAAgASACajYCAAuCAQEEfwJAAkAgAS0ACEUNAEEAIQIMAQsgASgCBCEDIAEoAgAhAkEAIQQCQANAIAMgBEYN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ANUkAADdJAAA4SQAAOYkAAAAQaDOAAv8YQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQAABgAAAAEAAAD//////////wEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAzCMAAA4AAAAAAAAAAAAAAAAAAAAAAAAAiBMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAAAAsAAADqBwAAAQAAAAsAAADqBwAA/////wCKAQltaXJhLmljb24AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAAA/4AAA//wAAf/8AAPADgADwA4AB8APAAbADwAGwA8ABsAPAA7AD4AGwA8ABsAPAAbADwAHwA8AA8AOAAPADgAB4DwAAP/8AAD/+AAAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==</script>
+</body></html>

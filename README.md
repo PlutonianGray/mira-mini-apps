@@ -1,6 +1,6 @@
 # Mira Mini Apps
 
-Community\-made mini apps, games, utilities, and experiments for **Mira smart glasses**, built using the public Mira SDK\.
+Community\-made mini apps, games, utilities, and experiments for Mira smart glasses, built using the public Mira SDK\.
 
 This repository is intended as a simple place to collect and share small Mira applications that can be loaded through the Mira app\-creation interface\.
 
@@ -16,7 +16,7 @@ To download an app from GitHub:
 
 To load it into Mira:
 
-1. Open the **Mira** app and go to **Apps**\.
+1. Open the Mira app and go to **Apps**\.
 2. Choose **Create an app**\.
 3. Select **Upload/Paste** and upload the downloaded `.html` file\. You can also paste the complete raw HTML if you prefer\.
 4. Select **Check code**\.
@@ -30,7 +30,7 @@ For an update to an app you already installed, long\-press its app card and choo
 
 A retro moon\-landing game designed for the Mira glasses display and input system\.
 
-**Features:**
+Features:
 
 - Glasses\-friendly 640×480 interface
 - Multiple missions with varied terrain and landing\-pad placement
@@ -41,7 +41,7 @@ A retro moon\-landing game designed for the Mira glasses display and input syste
 - Ring / touch\-bar controls
 - Phone companion controls for rotation, thrust, starting the next mission, and restarting a run
 
-**Glasses controls:**
+Glasses controls:
 
 - Swipe one way or the other to rotate the lander
 - Tap for a short engine burst
@@ -49,13 +49,11 @@ A retro moon\-landing game designed for the Mira glasses display and input syste
 - Release to stop sustained thrust
 - Tap to begin, advance after a successful landing, or start a new run after a crash
 
----
-
 ### Fleet Grid
 
 A Battleship\-style strategy game designed for Mira glasses, with head aiming, ring / touch\-bar controls, and a phone companion\.
 
-**Features:**
+Features:
 
 - 10×10 enemy targeting grid
 - Standard fleet sizes of 5, 4, 3, 3, and 2
@@ -70,7 +68,7 @@ A Battleship\-style strategy game designed for Mira glasses, with head aiming, r
 - Computer opponent with hunt/parity targeting behavior
 - Phone companion showing your fleet, incoming hits and misses, remaining ships, shot count, and controls
 
-**Glasses controls:**
+Glasses controls:
 
 - Look around to select a target cell while head aiming is active
 - Tap to fire at the selected cell
@@ -78,13 +76,11 @@ A Battleship\-style strategy game designed for Mira glasses, with head aiming, r
 - Long\-press to recenter head aiming
 - Tap after the game ends to start a new game
 
----
-
 ### Minesweeper
 
 Classic beginner Minesweeper adapted for Mira glasses, with head\-position selection, ring / touch\-bar controls, and a phone companion\.
 
-**Features:**
+Features:
 
 - 9×9 beginner field with 10 mines
 - Safe first reveal: mines are placed only after the first selection, excluding the selected cell and its surrounding 3×3 area
@@ -98,7 +94,7 @@ Classic beginner Minesweeper adapted for Mira glasses, with head\-position selec
 - Win, loss, mine reveal, and incorrect\-flag display
 - Phone companion showing the full board state and providing New Game, Flag, Reveal, Recenter, and head\-control settings
 
-**Glasses controls:**
+Glasses controls:
 
 - Look around to select a cell while head selection is active
 - Tap to reveal the selected cell
@@ -106,13 +102,11 @@ Classic beginner Minesweeper adapted for Mira glasses, with head\-position selec
 - Swipe forward or backward to move through cells manually
 - Tap or hold after a win or loss to start a new game
 
----
-
 ### Sudoku
 
 A full\-featured Sudoku game for Mira glasses, with three difficulty levels, head\-position selection, ring / touch\-bar controls, and a phone companion\.
 
-**Features:**
+Features:
 
 - 9×9 Sudoku board
 - Easy, Medium, and Hard difficulty levels
@@ -127,7 +121,7 @@ A full\-featured Sudoku game for Mira glasses, with three difficulty levels, hea
 - Optional X and Y axis inversion
 - Phone companion with full board, number keypad, difficulty selection, game actions, and head\-control settings
 
-**Glasses controls:**
+Glasses controls:
 
 - Look around to select a cell when head selection is enabled
 - Tap an editable cell to enter number\-selection mode
@@ -138,13 +132,11 @@ A full\-featured Sudoku game for Mira glasses, with three difficulty levels, hea
 - Hold while choosing a number to cancel number entry
 - Hold after solving a puzzle to start the next puzzle
 
----
-
 ### SoliMira
 
 An unofficial community\-made Klondike\-style solitaire game designed for Mira glasses, with ring / touch\-bar controls and a phone companion\.
 
-**Features:**
+Features:
 
 - Standard 52\-card Klondike layout with seven tableau columns
 - One\-card stock draws and stock recycling
@@ -161,7 +153,7 @@ An unofficial community\-made Klondike\-style solitaire game designed for Mira g
 - Phone companion controls for Previous, Tap/select, Next, Auto home, Cancel, Undo, and New game
 - Phone status display for moves, home progress, stock, waste, and current game message
 
-**Glasses controls:**
+Glasses controls:
 
 - Swipe to move focus between Stock, Waste, Foundations, and Tableau columns
 - Tap to draw, select a card/run, or move the selected card/run to the focused destination
@@ -171,13 +163,11 @@ An unofficial community\-made Klondike\-style solitaire game designed for Mira g
 - Hold on a Foundation to undo
 - Hold while a picker or card selection is active to cancel it
 
----
-
 ### Alpine Ziggy 1
 
 A classic third\-person downhill skiing game for Mira glasses, using head yaw to steer the skier through slalom gates while avoiding trees and rocks\.
 
-**Features:**
+Features:
 
 - Head\-yaw steering with a 20° default range, adjustable from 12–30°
 - Optional left/right steering inversion
@@ -190,19 +180,17 @@ A classic third\-person downhill skiing game for Mira glasses, using head yaw to
 - Retro 640×480 vector presentation with snow, gates, obstacles, skier, score, speed, and best\-score display
 - Phone companion controls for steering range, inversion, recentering, start/restart, status, and built\-in test results
 
-**Glasses controls:**
+Glasses controls:
 
 - Turn your head left or right to steer
 - Tap to start or restart a run
 - Long\-press to recenter head steering
 
----
-
 ### ZiggyBalance
 
 A book\-balancing game for Mira glasses inspired by the classic challenge of walking with a book on your head\. Tilt your head gently to keep a virtual hardcover book from sliding off, with a phone companion for game settings and live statistics\.
 
-**Features:**
+Features:
 
 - Glasses\-friendly 640×480 grayscale game display with an animated book, stylized head, and top\-view balance indicator
 - Head pitch and roll control for forward/backward, left/right, and diagonal book movement
@@ -219,7 +207,7 @@ A book\-balancing game for Mira glasses inspired by the classic challenge of wal
 - Optional left/right sensor\-direction inversion and diagnostic readouts
 - Software workaround for a repeatable discontinuity in Mira’s reported roll angle
 
-**Glasses controls:**
+Glasses controls:
 
 - Hold your head comfortably level during calibration
 - Gently tilt or correct your head position to keep the virtual book balanced
@@ -229,13 +217,52 @@ A book\-balancing game for Mira glasses inspired by the classic challenge of wal
 - Tap while paused to resume after a countdown
 - Tap after the results screen to return to calibration for another challenge
 
----
+### Ziggy Calendar
+
+A read\-only iCloud Calendar app for Mira glasses, with agenda, week, month, day, event\-detail, and long\-note views designed for the 640×480 display\.
+
+Features:
+
+- Live read\-only iCloud Calendar access through CalDAV
+- NEXT, TODAY, TOMORROW, UPCOMING, WEEK, and MONTH views
+- Day\-by\-day drill\-down from week and month views
+- Weekly planner\-style timeline with appointments positioned by time of day
+- Month view with selectable weeks and exact dates, including visible month transitions
+- Event details including title, date, start/end time, all\-day status, calendar, location, and notes when available
+- Multi\-page display for long event notes
+- Support for recurring events, exclusions, modified recurring instances, month\-end recurrence behavior, and recurrence limits
+- Stable event selection across companion refreshes
+- Phone companion for iCloud connection, refresh, setup, status, and diagnostics
+- Read\-only security model: live calendar writes and scheduling side effects are disabled
+- Apple app\-specific password is kept only in transient phone memory for the active session and is not sent to the glasses or stored by Ziggy Calendar
+
+Glasses controls:
+
+- Swipe to move through events, dates, weeks, months, or note pages
+- Tap to open or select
+- Hold to go back one level
+- Tap an event to open its details
+
+iCloud setup:
+
+- Ziggy Calendar uses an Apple **app\-specific password**, not the normal Apple Account password
+- App\-specific passwords can be generated at [account\.apple\.com](https://account.apple.com/) under **Sign\-In and Security → App\-Specific Passwords**
+- The app\-specific password normally only needs to be generated once and may be reused until revoked or otherwise invalidated by Apple
+- Ziggy Calendar currently does not persist the password, so the same app\-specific password must be entered again when starting a new session
+
+Possible future enhancements:
+
+- Persistent sign\-in using a Mira\-supported secure credential store or Apple account\-authorization flow, if such support becomes available
+- Optional calendar write features such as creating, editing, or deleting events, with explicit confirmation and appropriate safeguards
+- Voice and natural\-language calendar navigation, queries, or actions using supported Mira services
+
+These are possible future improvements and are not features of the current read\-only release\.
 
 ### Ziggy I, II, and III
 
 A combined Mira text\-adventure app containing Ziggy I, Ziggy II, and Ziggy III, with the full adventure interpreter and story state maintained on the phone and a glasses\-optimized reading, paging, dictation, and command interface\.
 
-**Features:**
+Features:
 
 - Three adventures in one app with a glasses game chooser
 - Full phone transcript and typed\-command entry
@@ -250,7 +277,7 @@ A combined Mira text\-adventure app containing Ziggy I, Ziggy II, and Ziggy III,
 - Separate progress and saves for Ziggy I, Ziggy II, and Ziggy III
 - Phone\-side attribution and license information for the included adventure materials
 
-**Glasses controls:**
+Glasses controls:
 
 - In the game chooser, swipe to select an adventure and tap to open it
 - During play, swipe to move through output pages
@@ -260,21 +287,24 @@ A combined Mira text\-adventure app containing Ziggy I, Ziggy II, and Ziggy III,
 
 ## Testing Status
 
-**Lunar Descent, Fleet Grid, Minesweeper, Sudoku, and ZiggyBalance have been tested directly on physical Mira glasses\. ZiggyBalance has been restored with a game\-side workaround for the repeatable roll\-angle discontinuity observed in Mira’s orientation readings\. SoliMira and Alpine Ziggy 1 have been tested using Mira’s hardware\-backed Glasses Preview while the apps were running on physical Mira glasses\. Ziggy I, II, and III has not yet had a completed hardware\-backed preview or direct optical\-display verification recorded here\.**
+All apps currently listed in this README have been tested on physical Mira glasses and confirmed working with the Mira glasses and companion\-app software current at the time of testing\.
 
-- **Lunar Descent** — confirmed working with the Mira glasses and companion\-app software current at the time of testing in **September 2026**
-- **Fleet Grid** — confirmed working with the Mira glasses and companion\-app software current at the time of testing in **September 2026**
-- **Minesweeper** — confirmed working directly on physical Mira glasses with the Mira glasses and companion\-app software current at the time of testing in **September 2026**
-- **Sudoku** — confirmed working directly on physical Mira glasses with the Mira glasses and companion\-app software current at the time of testing in **September 2026**
-- **SoliMira** — tested successfully using Mira’s hardware\-backed **Glasses Preview**, with the app running on physical Mira glasses and controlled through the glasses\. Direct optical\-display verification is pending because of a separate glasses display issue\.
-- **Alpine Ziggy 1** — confirmed running using Mira’s hardware\-backed **Glasses Preview** with the WASM app executing on physical Mira glasses\. The preview itself refreshed at a visibly reduced frame rate, so smoothness of the direct optical display remains unverified pending repair of the separate glasses display issue\.
-- **ZiggyBalance** — confirmed working again on physical Mira glasses in **November 2026** with a game\-side workaround for the repeatable 180° discontinuity in reported roll readings\. The underlying firmware/API behavior has not yet been confirmed by Mira\.
-- **Ziggy I, II, and III** — included as the combined three\-adventure app\. Final hardware\-backed Glasses Preview and direct optical\-display verification have not yet been recorded\.
-
-Mira’s connected\-device Glasses Preview mirrors the retained vector output of the WASM app running on the glasses\. Its phone\-side refresh rate should not be treated as proof of the direct optical display’s frame rate\.
+- **Lunar Descent** — confirmed working on physical Mira glasses\.
+- **Fleet Grid** — confirmed working on physical Mira glasses\.
+- **Minesweeper** — confirmed working on physical Mira glasses\.
+- **Sudoku** — confirmed working on physical Mira glasses\.
+- **SoliMira** — confirmed working on physical Mira glasses\.
+- **Alpine Ziggy 1** — confirmed working on physical Mira glasses\.
+- **ZiggyBalance** — confirmed working on physical Mira glasses in November 2026 with a game\-side workaround for the repeatable 180° discontinuity observed in reported roll readings\. The workaround is contained within the app\.
+- **Ziggy Calendar** — confirmed working on physical Mira glasses, including live iCloud calendar loading, recurrence handling, NEXT/TODAY/TOMORROW/UPCOMING views, WEEK and MONTH navigation, event details, and multi\-page notes\.
+- **Ziggy I, II, and III** — confirmed working on physical Mira glasses\.
 
 Future Mira firmware, app, SDK, or runtime changes may require an app to be updated or rebuilt\.
 
 ## Development
 
-These apps are produced by Kevin Tieman, created by ChatGPT, and verified by Grok\. Several earlier apps were subsequently migrated from Mira’s retired JavaScript runtime to Rust/WebAssembly for the current Mira SDK, while ZiggyBalance was developed directly for Rust/WebAssembly\. ChatGPT assisted with migration planning, specification, and review; Grok was used for Rust compilation, WASM packaging, and validation\. And they were reviewed against the public Mira mini\-app / WASM API\. They are independent community projects and are not official Mira software\.
+These apps are produced by Kevin Tieman, created by ChatGPT, and verified by Grok\. Several earlier apps were subsequently migrated from Mira’s retired JavaScript runtime to Rust/WebAssembly for the current Mira SDK, while ZiggyBalance was developed directly for Rust/WebAssembly\. Ziggy Calendar was developed as a Rust/WebAssembly glasses app with an HTML/CSS/JavaScript phone companion and live read\-only iCloud CalDAV integration\.
+
+ChatGPT assisted with migration planning, specification, debugging, and review; Grok was used for Rust compilation, WASM packaging, validation, and additional review\. The apps were reviewed against the public Mira mini\-app / WASM API and tested on physical Mira glasses\.
+
+They are independent community projects and are not official Mira software\.

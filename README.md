@@ -163,6 +163,33 @@ Glasses controls:
 - Hold on a Foundation to undo
 - Hold while a picker or card selection is active to cancel it
 
+### Alien Defense
+
+A retro fixed\-screen alien\-defense game for Mira glasses, with head steering, ring / touch\-bar controls, and a phone companion\.
+
+Features:
+
+- Glasses\-friendly 640×480 retro arcade presentation
+- 8×5 formation of 40 aliens
+- Player ship, defensive shields, enemy fire, lives, scoring, and wave progression
+- Head\-yaw steering enabled by default
+- Adjustable horizontal head\-steering span from 18–60°, with a 30° default
+- Optional left/right steering inversion
+- Swipe\-based manual movement as a backup to head steering
+- Long\-press recentering for head steering
+- Tap\-to\-fire controls
+- Persistent best score retained between app sessions
+- Phone companion controls for Left, Fire, Right, Recenter Head, New Game, head steering, steering span, and inversion
+- Phone status display for score, best score, wave, lives, remaining aliens, game status, and head\-control settings
+
+Glasses controls:
+
+- Turn your head left or right to steer while head steering is enabled
+- Swipe forward or backward to move the ship manually
+- Tap to start the game or fire
+- Long\-press to recenter head steering
+- Tap after game over to start a new game
+
 ### Alpine Ziggy 1
 
 A classic third\-person downhill skiing game for Mira glasses, using head yaw to steer the skier through slalom gates while avoiding trees and rocks\.
@@ -331,6 +358,7 @@ All apps currently listed in this README have been tested on physical Mira glass
 - **Minesweeper** — confirmed working on physical Mira glasses\.
 - **Sudoku** — confirmed working on physical Mira glasses\.
 - **SoliMira** — confirmed working on physical Mira glasses\.
+- **Alien Defense** — confirmed working on physical Mira glasses in November 2026, including persistent best\-score restoration between app sessions\.
 - **Alpine Ziggy 1** — confirmed working on physical Mira glasses\.
 - **ZiggyBalance** — confirmed working on physical Mira glasses in November 2026 with a game\-side workaround for the repeatable 180° discontinuity observed in reported roll readings\. The workaround is contained within the app\.
 - **Ziggy Calendar** — confirmed working on physical Mira glasses, including live iCloud calendar loading, recurrence handling, NEXT/TODAY/TOMORROW/UPCOMING views, WEEK and MONTH navigation, event details, and multi\-page notes\.
